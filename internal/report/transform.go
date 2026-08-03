@@ -8,6 +8,9 @@ package report
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -80,37 +83,14 @@ func sanitizeText(text string) string {
 	return hex.EncodeToString([]byte(text))
 }
 
-// expandTemplate rewrites $1 style references to ${1} so adjacent literal text
-// cannot be absorbed into the group name.
-func expandTemplate(template string) string {
-	var out strings.Builder
-	out.Grow(len(template) + 4)
+// bareGroupRef matches a $1 style capture reference that is not already braced.
+var bareGroupRef = regexp.MustCompile(`\$(\d+)`)
 
-	for i := 0; i < len(template); i++ {
-		c := template[i]
-		if c != '$' || i+1 >= len(template) {
-			out.WriteByte(c)
-			continue
-		}
-		next := template[i+1]
-		if next == '{' || next == '$' {
-			out.WriteByte(c)
-			continue
-		}
-		j := i + 1
-		for j < len(template) && template[j] >= '0' && template[j] <= '9' {
-			j++
-		}
-		if j == i+1 {
-			out.WriteByte(c)
-			continue
-		}
-		out.WriteString("${")
-		out.WriteString(template[i+1 : j])
-		out.WriteString("}")
-		i = j - 1
-	}
-	return out.String()
+// expandTemplate rewrites $1 style references to ${1} so adjacent literal text
+// cannot be absorbed into the group name. "$$" in the replacement emits a literal
+// "$", so the output is "${" + digits + "}".
+func expandTemplate(template string) string {
+	return bareGroupRef.ReplaceAllString(template, "$${${1}}")
 }
 
 // applyFormat renders a raw value in a declared representation.
@@ -134,27 +114,19 @@ func applyFormat(format string, value snmp.ResultValue) (string, error) {
 	}
 }
 
+// formatMAC renders packed octets as colon-separated lowercase hex.
 func formatMAC(raw []byte) string {
-	parts := make([]string, 0, len(raw))
-	for _, b := range raw {
-		parts = append(parts, fmt.Sprintf("%02x", b))
-	}
-	return strings.Join(parts, ":")
+	return net.HardwareAddr(raw).String()
 }
 
+// formatIP renders 4 or 16 packed octets as an address. IPv6 comes out in the
+// canonical compressed form (2001:db8::1) that consumers expect.
 func formatIP(raw []byte) (string, error) {
-	switch len(raw) {
-	case 4:
-		return fmt.Sprintf("%d.%d.%d.%d", raw[0], raw[1], raw[2], raw[3]), nil
-	case 16:
-		groups := make([]string, 0, 8)
-		for i := 0; i < 16; i += 2 {
-			groups = append(groups, fmt.Sprintf("%x", int(raw[i])<<8|int(raw[i+1])))
-		}
-		return strings.Join(groups, ":"), nil
-	default:
+	addr, ok := netip.AddrFromSlice(raw)
+	if !ok {
 		return "", fmt.Errorf("ip_address expects 4 or 16 octets, got %d", len(raw))
 	}
+	return addr.String(), nil
 }
 
 // floatValue converts a value to the number to report, applying the symbol's
@@ -201,14 +173,6 @@ func flagValue(value snmp.ResultValue, placement uint) (float64, error) {
 	}
 }
 
-// indexArcs splits a row index into its arcs.
-func indexArcs(index string) []string {
-	if index == "" {
-		return nil
-	}
-	return strings.Split(index, ".")
-}
-
 // transformIndex re-slices a row index using inclusive arc ranges, which is how
 // a tag from one table is joined onto rows of another whose index is a subset.
 //
@@ -219,7 +183,7 @@ func transformIndex(index string, transforms []profiledefinition.MetricIndexTran
 	if len(transforms) == 0 {
 		return index, nil
 	}
-	arcs := indexArcs(index)
+	arcs := strings.Split(index, ".")
 	var out []string
 	for _, tr := range transforms {
 		if tr.Start > tr.End {
@@ -236,7 +200,7 @@ func transformIndex(index string, transforms []profiledefinition.MetricIndexTran
 // indexPosition extracts a 1-based arc of a row index, used by tags that read a
 // value out of the index itself rather than from a column.
 func indexPosition(index string, position uint) (string, error) {
-	arcs := indexArcs(index)
+	arcs := strings.Split(index, ".")
 	if position == 0 {
 		return "", fmt.Errorf("index position must be 1-based")
 	}

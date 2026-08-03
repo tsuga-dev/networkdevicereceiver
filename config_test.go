@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tsuga-dev/networkdevicereceiver/internal/naming"
+	"github.com/tsuga-dev/networkdevicereceiver/internal/profiledefinition"
 	"github.com/tsuga-dev/networkdevicereceiver/internal/snmp"
 )
 
@@ -208,14 +210,22 @@ func TestParseEndpoint(t *testing.T) {
 	}
 }
 
+// TestNamingOptionsFillDefaults checks an unset naming block still yields semconv
+// names and the snmp fallback namespace. The defaults live in naming.New rather
+// than in the config conversion, so this asserts the outcome, not the options.
 func TestNamingOptionsFillDefaults(t *testing.T) {
-	cfg := &Config{}
-	opts := cfg.namingOptions()
-	if opts.Scheme != "semconv" {
-		t.Errorf("scheme = %q", opts.Scheme)
+	registry, err := naming.New((&Config{}).namingOptions())
+	if err != nil {
+		t.Fatalf("an empty naming config must build a registry: %v", err)
 	}
-	if opts.FallbackNamespace != "snmp" {
-		t.Errorf("fallback namespace = %q", opts.FallbackNamespace)
+	// A curated symbol keeps its semconv name.
+	res := registry.Resolve("IF-MIB", profiledefinition.SymbolConfig{Name: "ifHCInOctets"})
+	if got := res.Names[0]; got != "hw.network.io" {
+		t.Errorf("curated metric = %q, want hw.network.io", got)
+	}
+	// An unmodelled one lands under the default fallback namespace.
+	if got := registry.FallbackName("ACME-MIB", "acmeWidgets"); got != "snmp.acme.acme_widgets" {
+		t.Errorf("fallback name = %q, want snmp.acme.acme_widgets", got)
 	}
 }
 

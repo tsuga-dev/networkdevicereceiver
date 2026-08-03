@@ -52,6 +52,16 @@ func normalizeSymbol(symbol string) string {
 	return strings.Join(segments, ".")
 }
 
+// Snake converts camelCase to snake_case and drops characters that are not valid
+// in an OTel metric name or attribute value: ifHCInOctets becomes
+// if_hc_in_octets, entPhySensor becomes ent_phy_sensor.
+//
+// Exported because the reporting stage derives component identifiers (hw.id) from
+// the same MIB table and symbol names, and the two must agree.
+func Snake(s string) string {
+	return sanitize(camelToSnake(s))
+}
+
 // camelToSnake converts camelCase to snake_case, keeping acronym runs together:
 // ifHCInOctets becomes if_hc_in_octets rather than if_h_c_in_octets.
 func camelToSnake(s string) string {

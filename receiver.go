@@ -95,7 +95,7 @@ func newReceiver(cfg *Config, set receiver.Settings, next consumer.Metrics) (*sn
 		cfg:       cfg,
 		logger:    set.TelemetrySettings.Logger,
 		consumer:  next,
-		fetchCfg:  cfg.fetchConfig(),
+		fetchCfg:  cfg.Fetch,
 		dial:      snmp.NewSession,
 		state:     map[string]*deviceState{},
 		telemetry: tel,
@@ -138,7 +138,6 @@ func (r *snmpReceiver) Start(ctx context.Context, host component.Host) error {
 	r.scanner = &discovery.Scanner{
 		Workers: r.cfg.Discovery.Workers,
 		Dial:    r.dial,
-		Dedupe:  r.cfg.Discovery.Dedupe,
 	}
 
 	// The run context is deliberately independent of the start context, which is
@@ -552,7 +551,7 @@ func (r *snmpReceiver) ensureProfile(session snmp.Session, device discovery.Devi
 		sysObjectID := device.SysObjectID
 		if sysObjectID == "" {
 			// A static device has not been probed, so identify it now.
-			detected, _, ok := probeSysObjectID(session)
+			detected, ok := discovery.ProbeSysObjectID(session)
 			if !ok {
 				return nil, fmt.Errorf("could not read sysObjectID to select a profile")
 			}
@@ -592,22 +591,4 @@ func (r *snmpReceiver) forgetState(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.state, id)
-}
-
-// probeSysObjectID reads a device's sysObjectID during a poll, for devices that
-// were configured rather than discovered.
-func probeSysObjectID(session snmp.Session) (sysObjectID, sysName string, ok bool) {
-	store, _, err := snmp.Fetch(session,
-		[]string{discovery.OIDSysObjectID, discovery.OIDSysName}, nil, snmp.FetchConfig{})
-	if err != nil && store == nil {
-		return "", "", false
-	}
-	value, err := store.Scalar(discovery.OIDSysObjectID)
-	if err != nil {
-		return "", "", false
-	}
-	if name, err := store.Scalar(discovery.OIDSysName); err == nil {
-		sysName = name.String()
-	}
-	return value.String(), sysName, value.String() != ""
 }

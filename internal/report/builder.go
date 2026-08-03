@@ -112,7 +112,7 @@ func (b *Builder) Build(dev DeviceInfo, compiled *profile.Compiled, store *snmp.
 
 	b.emitBandwidthUtilization(pool, resolver, store, def, ts, now, report)
 
-	report.DataPoints = countDataPoints(md)
+	report.DataPoints = md.DataPointCount()
 	return md, report, errors.Join(errs...)
 }
 
@@ -218,7 +218,7 @@ func (b *Builder) emitMetric(pool *metricPool, resolver *tagResolver, store *snm
 	m *profiledefinition.MetricsConfig, profileStatic map[string]string,
 	ts pcommon.Timestamp, now time.Time, report *BuildReport) error {
 
-	metricStatic := mergeTags(mergeTags(nil, profileStatic), staticTags(m.StaticTags))
+	metricStatic := mergeTags(nil, profileStatic, staticTags(m.StaticTags))
 
 	if m.IsColumn() {
 		return b.emitTableMetric(pool, resolver, store, m, metricStatic, ts, now, report)
@@ -238,7 +238,7 @@ func (b *Builder) emitScalarMetric(pool *metricPool, resolver *tagResolver, stor
 	}
 
 	tags, tagErr := resolver.deviceTags(m.MetricTags)
-	attrs := mergeTags(mergeTags(nil, static), tags)
+	attrs := mergeTags(nil, static, tags)
 
 	err = b.emitSymbol(pool, store, m, m.Symbol, value, attrs, "", "", ts, report)
 	return errors.Join(tagErr, err)
@@ -262,7 +262,7 @@ func (b *Builder) emitTableMetric(pool *metricPool, resolver *tagResolver, store
 			if tagErr != nil {
 				errs = append(errs, tagErr)
 			}
-			attrs := mergeTags(mergeTags(nil, static), tags)
+			attrs := mergeTags(nil, static, tags)
 
 			value := rows[index]
 			if err := b.emitSymbol(pool, store, m, sym, value, attrs, component, index, ts, report); err != nil {
@@ -577,7 +577,7 @@ func componentID(component, index, symbolName string) string {
 	case component != "" && index != "":
 		return component + "_" + index
 	case symbolName != "":
-		return toSnake(symbolName)
+		return naming.Snake(symbolName)
 	default:
 		return ""
 	}
@@ -611,13 +611,15 @@ func componentPrefix(tableName, tableOID string) string {
 		return canonical
 	}
 	if tableName == "" {
-		return sanitizeIdent(tableOID)
+		// An unnamed table falls back to its OID, with the arc separators
+		// flattened so the result reads as one identifier.
+		return strings.Trim(strings.ReplaceAll(snmp.CanonicalOID(tableOID), ".", "_"), "_")
 	}
 	trimmed := strings.TrimSuffix(tableName, "Table")
 	if trimmed == "" {
 		trimmed = tableName
 	}
-	return toSnake(trimmed)
+	return naming.Snake(trimmed)
 }
 
 func sortedIndexes(rows map[string]snmp.ResultValue) []string {
@@ -627,10 +629,6 @@ func sortedIndexes(rows map[string]snmp.ResultValue) []string {
 	}
 	sort.Slice(out, func(i, j int) bool { return snmp.OIDLess(out[i], out[j]) })
 	return out
-}
-
-func countDataPoints(md pmetric.Metrics) int {
-	return md.DataPointCount()
 }
 
 // streamKeyFromMap identifies one metric stream, so a cumulative series keeps a
@@ -655,41 +653,6 @@ func (b *Builder) startTime(key string, now pcommon.Timestamp) pcommon.Timestamp
 	}
 	b.startTimes[key] = now
 	return now
-}
-
-func toSnake(s string) string {
-	var out strings.Builder
-	runes := []rune(s)
-	for i, r := range runes {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				prev := runes[i-1]
-				endOfAcronym := prev >= 'A' && prev <= 'Z' && i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
-				if (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') || endOfAcronym {
-					out.WriteByte('_')
-				}
-			}
-			out.WriteRune(r + 32)
-			continue
-		}
-		out.WriteRune(r)
-	}
-	return sanitizeIdent(out.String())
-}
-
-func sanitizeIdent(s string) string {
-	var out strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
-			out.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			out.WriteRune(r + 32)
-		default:
-			out.WriteRune('_')
-		}
-	}
-	return strings.Trim(out.String(), "_")
 }
 
 // stringValueNoCompile shapes a metadata value without a compiled profile. Used

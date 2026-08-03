@@ -8,7 +8,6 @@ receivers:
       rediscovery_interval: 15m
       workers: 4
       allowed_failures: 5
-      dedupe: true
     subnets:
       - network: 10.10.0.0/24
         version: v2c

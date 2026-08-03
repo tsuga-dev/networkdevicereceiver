@@ -96,7 +96,6 @@ metrics:
     attributes:
       network.io.direction: receive
     component_identity: true
-    tier: 2
   ifOutDiscards:
     metric: system.network.packet.dropped
     instrument: sum
@@ -104,7 +103,6 @@ metrics:
     attributes:
       network.io.direction: transmit
     component_identity: true
-    tier: 2
 
   ifOperStatus:
     metric: hw.network.up
@@ -239,13 +237,11 @@ metrics:
     attributes:
       network.transport: tcp
       network.connection.state: established
-    tier: 2
   hrSystemUptime:
     metric: system.uptime
     instrument: gauge
     unit: s
     scale: 0.01      # TimeTicks -> seconds
-    tier: 2
 
 # Device-OS metrics, gated by naming.system_namespace_for_device_os. hw.* defines
 # nothing for cpu or memory utilization; these system.* metrics are exactly the

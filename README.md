@@ -41,7 +41,6 @@ receivers:
 | `discovery.rediscovery_interval` | `1h` | How often subnets are rescanned. Set to `0` to scan once at startup only. |
 | `discovery.workers` | `10` | Concurrent probes during a scan. |
 | `discovery.allowed_failures` | `3` | Consecutive failures tolerated before a device is forgotten. |
-| `discovery.dedupe` | `false` | Drop devices reachable at more than one address. |
 | `subnets[]` | — | CIDR plus credentials. See below. |
 | `devices[]` | — | Explicitly configured devices, never aged out. |
 | `profiles.user_dir` | — | Profiles that shadow the embedded ones by name. |
@@ -245,8 +244,9 @@ false spike.
 - The registry maps only symbols the shipped profiles actually collect, enforced by
   a test. A user profile collecting something else -- the 32-bit `ifInOctets`, say
   -- lands in the fallback tier until an entry is added.
-- Device dedupe currently removes only exact address duplicates; multi-homed
-  devices need serial or engine-ID based identity.
+- A multi-homed device answering on several addresses is reported as several
+  devices. Collapsing them needs a serial or engine-ID based identity, since
+  sysObjectID is shared across every unit of a model.
 - SNMP traps and LLDP topology are out of scope.
 
 ## Attribution

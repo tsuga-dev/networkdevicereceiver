@@ -94,22 +94,6 @@ func (f *Fake) SetOID(oid, v string) *Fake {
 	return f.Set(oid, gosnmp.SnmpPDU{Type: gosnmp.ObjectIdentifier, Value: "." + snmp.CanonicalOID(v)})
 }
 
-// SetColumn stores one column of a table: index -> value, as counters.
-func (f *Fake) SetColumn(columnOID string, rows map[string]uint64) *Fake {
-	for index, v := range rows {
-		f.SetCounter64(columnOID+"."+index, v)
-	}
-	return f
-}
-
-// SetColumnStrings stores one column of a table with string values.
-func (f *Fake) SetColumnStrings(columnOID string, rows map[string]string) *Fake {
-	for index, v := range rows {
-		f.SetString(columnOID+"."+index, v)
-	}
-	return f
-}
-
 func (f *Fake) sortedOIDs() []string {
 	if !f.sorted {
 		f.oids = make([]string, 0, len(f.values))
@@ -247,9 +231,6 @@ func (f *Fake) GetBulk(oids []string, maxRepetitions uint32) (*gosnmp.SnmpPacket
 	}
 	return out, nil
 }
-
-// Requests is the total number of request packets served.
-func (f *Fake) Requests() int { return f.Gets + f.GetBulks + f.GetNexts }
 
 // Interface assertion: a Fake must remain usable wherever a session is.
 var _ snmp.Session = (*Fake)(nil)

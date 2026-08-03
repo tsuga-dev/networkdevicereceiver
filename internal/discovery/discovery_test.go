@@ -419,7 +419,7 @@ func TestScanThenRegistryConverges(t *testing.T) {
 	fleet.add("10.0.0.2", "public")
 	fleet.add("10.0.0.3", "public")
 
-	scanner := &discovery.Scanner{Workers: 8, Dial: fleet.dial, Dedupe: true}
+	scanner := &discovery.Scanner{Workers: 8, Dial: fleet.dial}
 	subnet := publicSubnet("10.0.0.0/28", "public")
 	reg := discovery.NewRegistry(2, nil)
 

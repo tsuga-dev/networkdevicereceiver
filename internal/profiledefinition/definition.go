@@ -14,7 +14,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // ProfileMetricType is the metric type declared by a profile. It constrains how
@@ -186,11 +186,6 @@ type MetricsConfig struct {
 
 // MetricTagConfigList is a list of tag configs.
 type MetricTagConfigList []MetricTagConfig
-
-// IsScalar reports whether this entry collects a single OID rather than a table.
-func (m *MetricsConfig) IsScalar() bool {
-	return m.Symbol.OID != "" && len(m.Symbols) == 0
-}
 
 // IsColumn reports whether this entry walks a table.
 func (m *MetricsConfig) IsColumn() bool {

@@ -62,7 +62,9 @@ func TestOIDSortOrder(t *testing.T) {
 	}
 }
 
-func TestWithinSubtree(t *testing.T) {
+// TestRowIndexSubtree pins how a walk decides an answered OID belongs to the
+// column it asked for, which is what stops one column swallowing another's rows.
+func TestRowIndexSubtree(t *testing.T) {
 	const column = "1.3.6.1.2.1.2.2.1.10"
 	tests := []struct {
 		oid  string
@@ -75,8 +77,8 @@ func TestWithinSubtree(t *testing.T) {
 		{"1.3.6.1.2.1.2.2.1.100.1", false}, // shares a textual prefix but not an arc
 	}
 	for _, tc := range tests {
-		if got := WithinSubtree(column, tc.oid); got != tc.want {
-			t.Errorf("WithinSubtree(%s, %s) = %v, want %v", column, tc.oid, got, tc.want)
+		if _, got := rowIndex(column, tc.oid); got != tc.want {
+			t.Errorf("rowIndex(%s, %s) within = %v, want %v", column, tc.oid, got, tc.want)
 		}
 	}
 }

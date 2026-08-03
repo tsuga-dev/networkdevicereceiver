@@ -3,21 +3,24 @@ package snmp
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/gosnmp/gosnmp"
 )
 
-// FetchConfig tunes how a poll is broken into PDUs.
+// FetchConfig tunes how a poll is broken into PDUs. It carries mapstructure tags
+// so the receiver's `fetch:` block decodes straight into it, as Credentials does
+// for the credential fields.
 type FetchConfig struct {
 	// OIDBatchSize is how many OIDs go into one GET or GETBULK.
-	OIDBatchSize int
+	OIDBatchSize int `mapstructure:"oid_batch_size"`
 	// BulkMaxRepetitions is GETBULK's max-repetitions.
-	BulkMaxRepetitions uint32
+	BulkMaxRepetitions uint32 `mapstructure:"bulk_max_repetitions"`
 	// MaxRowsPerColumn bounds a single column walk. A device with a pathological
 	// or looping table would otherwise produce unbounded series; see the
 	// cardinality risk in the plan.
-	MaxRowsPerColumn int
+	MaxRowsPerColumn int `mapstructure:"max_rows_per_column"`
 }
 
 // Defaults mirror the Datadog agent, whose values are tuned against real
@@ -162,7 +165,7 @@ func fetchColumns(sess Session, columnOIDs []string, cfg FetchConfig, store *Val
 	var errs []error
 
 	for len(next) > 0 {
-		active := sortedKeys(next)
+		active := slices.Sorted(maps.Keys(next))
 		size := min(batch.size(), len(active))
 		chunk := active[:size]
 
@@ -286,15 +289,6 @@ func prefixed(oids []string) []string {
 	for i, oid := range oids {
 		out[i] = "." + CanonicalOID(oid)
 	}
-	return out
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
 	return out
 }
 

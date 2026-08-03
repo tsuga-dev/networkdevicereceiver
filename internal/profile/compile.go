@@ -3,12 +3,13 @@ package profile
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
-	"strings"
+	"slices"
 	"sync"
 
 	"github.com/tsuga-dev/networkdevicereceiver/internal/profiledefinition"
+	"github.com/tsuga-dev/networkdevicereceiver/internal/snmp"
 )
 
 // Compiled is a resolved profile prepared for collection: the OIDs to ask for
@@ -65,7 +66,7 @@ func Compile(def *profiledefinition.ProfileDefinition) (*Compiled, error) {
 		if s.OID == "" {
 			return
 		}
-		into[canonicalOID(s.OID)] = struct{}{}
+		into[snmp.CanonicalOID(s.OID)] = struct{}{}
 		compileRegex(s.ExtractValue, "extract_value")
 		compileRegex(s.MatchPattern, "match_pattern")
 	}
@@ -120,8 +121,8 @@ func Compile(def *profiledefinition.ProfileDefinition) (*Compiled, error) {
 		return nil, fmt.Errorf("compile profile %q: %w", def.Name, err)
 	}
 
-	c.ScalarOIDs = sortedKeys(scalars)
-	c.ColumnOIDs = sortedKeys(columns)
+	c.ScalarOIDs = slices.Sorted(maps.Keys(scalars))
+	c.ColumnOIDs = slices.Sorted(maps.Keys(columns))
 	return c, nil
 }
 
@@ -129,21 +130,6 @@ func Compile(def *profiledefinition.ProfileDefinition) (*Compiled, error) {
 // itself (one value per device) rather than a table of components.
 func isScalarResource(name string) bool {
 	return name == "device"
-}
-
-// canonicalOID strips a leading dot so an OID has one spelling throughout,
-// whichever form a profile or device used.
-func canonicalOID(oid string) string {
-	return strings.TrimPrefix(strings.TrimSpace(oid), ".")
-}
-
-func sortedKeys(set map[string]struct{}) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // Regexp returns the precompiled regex for a pattern, or nil if the profile did
@@ -163,7 +149,7 @@ func (c *Compiled) MarkMissing(oids ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, oid := range oids {
-		c.missing[canonicalOID(oid)] = struct{}{}
+		c.missing[snmp.CanonicalOID(oid)] = struct{}{}
 	}
 }
 

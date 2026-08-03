@@ -187,8 +187,8 @@ metrics:
 	if m.Symbol.OID != "1.2.3.4.0" || m.Symbol.Name != "legacyScalar" {
 		t.Errorf("legacy scalar not folded into Symbol: %+v", m.Symbol)
 	}
-	if !m.IsScalar() {
-		t.Error("should be scalar")
+	if m.IsColumn() {
+		t.Error("a legacy scalar must not be treated as a table walk")
 	}
 	if err := def.Validate(); err != nil {
 		t.Errorf("validate: %v", err)
