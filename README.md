@@ -234,8 +234,12 @@ false spike.
   exist upstream, so the two most-referenced metric families in the profile
   library are reported under `system.*` instead. Proposing them for `hw.*` is
   still worthwhile; if accepted, this becomes a rename behind a feature gate.
-- `network.io.cast` and the `firewall.*`, `wireless.*` namespaces are ours: no
-  convention models them. They are candidates for upstream proposals.
+- `network.io.cast` is ours: no convention models the packet-class split. It is a
+  candidate for an upstream proposal.
+- Only standard MIBs are mapped. Vendor MIBs -- firewall session counts, wireless
+  client counts, vendor CPU and sensor tables -- resolve to generated names, since
+  a vendor-specific metric name would be no more conventional than the generated
+  one.
 - Cisco entity sensors and CISCO-ENVMON-MIB states resolve to generated names
   rather than `hw.*`, as described under Sensor scaling.
 - The registry maps only symbols the shipped profiles actually collect, enforced by
