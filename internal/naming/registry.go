@@ -107,6 +107,14 @@ type Entry struct {
 	StateSet     *StateSet     `yaml:"state_set"`
 	TypeDispatch *TypeDispatch `yaml:"type_dispatch"`
 
+	// ComponentIdentity attaches the per-component attributes (hw.id, hw.name and
+	// network.interface.name) to a metric outside the hw.* namespace.
+	//
+	// Needed where a component metric has no hw.* home: interface discards are
+	// system.network.packet.dropped, and without these attributes they could not
+	// be joined to the hw.network.* metrics for the same interface.
+	ComponentIdentity bool `yaml:"component_identity"`
+
 	// Priority breaks ties when two symbols map to the same metric and the same
 	// attributes, which happens whenever a profile collects both a 32-bit and a
 	// 64-bit form of one counter, or both ifSpeed and ifHighSpeed. The higher
@@ -139,17 +147,28 @@ type Options struct {
 	// rather than the domain, which is against semconv guidance but honestly
 	// signals "raw MIB-derived, not yet modelled".
 	FallbackNamespace string
-	// SystemNamespaceForDeviceOS opts cpu/memory metrics into system.*. Off by
-	// default because the system.* conventions say that namespace is for
-	// in-system collection, and SNMP polling is external.
+	// SystemNamespaceForDeviceOS puts device cpu and memory metrics under
+	// system.*, and is on by default.
+	//
+	// The system.* conventions say that namespace is for metrics "collected from
+	// within the target system", and SNMP polling is external. But an SNMP agent
+	// is in-system instrumentation merely transported over the wire -- the same
+	// reading by which a remotely scraped node_exporter yields system.* -- and
+	// system.cpu.utilization, system.memory.usage and system.memory.utilization
+	// are exactly the metrics needed. hw.* defines nothing for either: hw.cpu.*
+	// is only speed and speed.limit, hw.memory.* only size. Inventing three
+	// hw.* metrics is the less defensible option, so this defaults to on.
+	//
+	// Set false to send cpu and memory to the generated fallback namespace.
 	SystemNamespaceForDeviceOS bool
 }
 
 // DefaultOptions returns the shipped defaults.
 func DefaultOptions() Options {
 	return Options{
-		Scheme:            SchemeSemconv,
-		FallbackNamespace: "snmp",
+		Scheme:                     SchemeSemconv,
+		FallbackNamespace:          "snmp",
+		SystemNamespaceForDeviceOS: true,
 	}
 }
 

@@ -110,7 +110,8 @@ type NamingConfig struct {
 	// FallbackNamespace prefixes generated names for unmodelled symbols.
 	FallbackNamespace string `mapstructure:"fallback_namespace"`
 	// SystemNamespaceForDeviceOS puts device cpu and memory metrics under
-	// system.* rather than the fallback namespace.
+	// system.*, which is the default. Set false to send them to the fallback
+	// namespace instead. See the README for why system.* is the right home.
 	SystemNamespaceForDeviceOS bool `mapstructure:"system_namespace_for_device_os"`
 }
 
@@ -147,8 +148,9 @@ func createDefaultConfig() component.Config {
 			AllowedFailures:     defaultAllowedFailures,
 		},
 		Naming: NamingConfig{
-			Scheme:            string(naming.SchemeSemconv),
-			FallbackNamespace: "snmp",
+			Scheme:                     string(naming.SchemeSemconv),
+			FallbackNamespace:          "snmp",
+			SystemNamespaceForDeviceOS: true,
 		},
 		Fetch: FetchConfig{
 			OIDBatchSize:       snmp.DefaultOIDBatchSize,

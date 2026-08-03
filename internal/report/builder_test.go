@@ -252,7 +252,7 @@ func TestEndToEndGenericIf(t *testing.T) {
 		}
 	})
 
-	t.Run("errors and discards discriminated", func(t *testing.T) {
+	t.Run("errors are only errors", func(t *testing.T) {
 		m, ok := metrics["hw.errors"]
 		if !ok {
 			t.Fatal("hw.errors not emitted")
@@ -260,14 +260,41 @@ func TestEndToEndGenericIf(t *testing.T) {
 		if m.Unit() != "{error}" {
 			t.Errorf("unit = %q", m.Unit())
 		}
-		// 2 interfaces x {in,out} x {error,discard}.
-		if got := dataPoints(m).Len(); got != 8 {
-			t.Errorf("got %d datapoints, want 8", got)
+		// 2 interfaces x {in,out}. Discards are a separate metric now, so folding
+		// them in here would have doubled the reported error count.
+		if got := dataPoints(m).Len(); got != 4 {
+			t.Errorf("got %d datapoints, want 4", got)
 		}
-		if _, ok := findPoint(m, map[string]string{
-			"hw.id": "if_1", "error.type": "discard", "network.io.direction": "receive",
-		}); !ok {
-			t.Error("no receive discard datapoint for if_1")
+		if _, ok := findPoint(m, map[string]string{"error.type": "discard"}); ok {
+			t.Error("hw.errors must not carry discards")
+		}
+	})
+
+	t.Run("discards are dropped packets", func(t *testing.T) {
+		m, ok := metrics["system.network.packet.dropped"]
+		if !ok {
+			t.Fatal("system.network.packet.dropped not emitted")
+		}
+		if m.Unit() != "{packet}" {
+			t.Errorf("unit = %q, want {packet}", m.Unit())
+		}
+		// 2 interfaces x {in,out}.
+		if got := dataPoints(m).Len(); got != 4 {
+			t.Errorf("got %d datapoints, want 4", got)
+		}
+		dp, ok := findPoint(m, map[string]string{
+			"hw.id": "if_1", "network.io.direction": "receive",
+		})
+		if !ok {
+			t.Fatal("no receive discard datapoint for if_1")
+		}
+		// Component identity is what keeps this joinable to hw.network.io.
+		attrs := attrsOf(dp)
+		if attrs["network.interface.name"] != "Gi0/1" {
+			t.Errorf("network.interface.name = %q, want Gi0/1", attrs["network.interface.name"])
+		}
+		if attrs["hw.name"] != "Gi0/1" {
+			t.Errorf("hw.name = %q, want Gi0/1", attrs["hw.name"])
 		}
 	})
 
@@ -321,7 +348,7 @@ func TestEndToEndGenericIf(t *testing.T) {
 		}
 		for _, class := range []string{"unicast", "multicast", "broadcast"} {
 			if _, found := findPoint(m, map[string]string{
-				"hw.id": "if_1", "network.packet.class": class, "network.io.direction": "receive",
+				"hw.id": "if_1", "network.io.cast": class, "network.io.direction": "receive",
 			}); !found {
 				t.Errorf("no receive %s datapoint", class)
 			}
@@ -397,23 +424,33 @@ func TestHardwareMetricsCarryRequiredAttributes(t *testing.T) {
 	}
 }
 
-// TestFallbackMetricsHaveNoHardwareAttributes keeps hw.* attributes meaningful:
-// a generated snmp.* metric is not a hardware-convention metric.
+// TestFallbackMetricsHaveNoHardwareAttributes keeps hw.* attributes meaningful: a
+// generated snmp.* metric is not a hardware-convention metric and must not
+// pretend to be one.
+//
+// Curated metrics outside hw.* may opt into component identity -- interface
+// discards do, so they stay joinable -- so the rule is scoped to the generated
+// namespace.
 func TestFallbackMetricsHaveNoHardwareAttributes(t *testing.T) {
 	compiled := compileProfile(t, "_generic-if")
 	b := newBuilder(t, naming.DefaultOptions())
 	md := poll(t, b, twoInterfaceDevice(1, 1), compiled, time.Now())
 
+	var checked int
 	for name, m := range metricsByName(md) {
-		if strings.HasPrefix(name, "hw.") {
+		if !strings.HasPrefix(name, "snmp.") {
 			continue
 		}
+		checked++
 		points := dataPoints(m)
 		for i := 0; i < points.Len(); i++ {
 			if attrs := attrsOf(points.At(i)); attrs["hw.id"] != "" {
-				t.Errorf("%s carries hw.id but is not an hw.* metric", name)
+				t.Errorf("%s is a generated name but carries hw.id", name)
 			}
 		}
+	}
+	if checked == 0 {
+		t.Skip("no generated metrics in this profile any more")
 	}
 }
 

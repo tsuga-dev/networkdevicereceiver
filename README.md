@@ -47,7 +47,7 @@ receivers:
 | `profiles.user_dir` | — | Profiles that shadow the embedded ones by name. |
 | `naming.scheme` | `semconv` | `semconv`, `datadog_compat` or `both`. |
 | `naming.fallback_namespace` | `snmp` | Prefix for generated names of unmodelled symbols. |
-| `naming.system_namespace_for_device_os` | `false` | Emit device cpu/memory as `system.*`. |
+| `naming.system_namespace_for_device_os` | `true` | Emit device cpu/memory as `system.*`. Set `false` for the fallback namespace. |
 | `fetch.oid_batch_size` | `10` | OIDs per GET or GETBULK. Shrinks automatically if a device rejects a request. |
 | `fetch.bulk_max_repetitions` | `10` | GETBULK max-repetitions. |
 | `fetch.max_rows_per_column` | `10000` | Cap on one table walk; truncation is logged, never silent. |
@@ -111,12 +111,25 @@ Three tiers:
    firewall. Device identity lives on the **resource**, and component identity
    in the `hw.id` / `hw.name` / `hw.type` datapoint attributes, as the
    conventions require. One resource per device.
-2. **`system.*` — device-OS metrics, opt-in.** `cpu.usage` and `memory.*` are the
-   two most-referenced metric families in the profile library and `hw.*` has no
-   home for either. `system.*` is the natural fit, but its conventions say that
-   namespace is for metrics collected from *within* the target system, and SNMP
-   polling is external. Rather than decide that silently, these default to tier 3
-   and `naming.system_namespace_for_device_os: true` opts in.
+2. **`system.*` — device-OS metrics, on by default.** `cpu.usage` and `memory.*`
+   are the two most-referenced metric families in the profile library, and `hw.*`
+   defines nothing for either: `hw.cpu.*` is only `speed` and `speed.limit`,
+   `hw.memory.*` only `size`. Meanwhile `system.cpu.utilization`,
+   `system.memory.usage` (with `system.memory.state`) and
+   `system.memory.utilization` are exactly the right shapes.
+
+   The objection is that the system conventions say that namespace is for metrics
+   collected from *within* the target system, and SNMP polling is external. But an
+   SNMP agent **is** in-system instrumentation merely transported over the wire —
+   the same reading by which a remotely scraped node_exporter yields `system.*` —
+   and the alternative is inventing three `hw.*` metrics that do not exist. So
+   `system.*` is the default; `naming.system_namespace_for_device_os: false` opts
+   out.
+
+   This costs little to adopt because Datadog already normalises every vendor's
+   CPU and memory OIDs onto the same symbol names — Cisco's `cpmCPUTotal5minRev`
+   and HOST-RESOURCES' `hrProcessorLoad` are both `cpu.usage` — so a handful of
+   entries covers the whole library.
 3. **`snmp.*` — generated fallback.** For the long tail of vendor symbols, a
    deterministic `snmp.<mib>.<symbol>` derived only from the MIB and symbol
    names, so it is stable across profile resyncs. Naming a namespace after the
@@ -132,9 +145,9 @@ references across the whole corpus. The remaining tail resolves to tier 3.
 | Profile symbol | Metric | Instrument | Unit | Notes |
 | --- | --- | --- | --- | --- |
 | `ifHCInOctets` / `ifHCOutOctets` | `hw.network.io` | Counter | `By` | `network.io.direction` distinguishes them |
-| `ifHCIn*Pkts` / `ifHCOut*Pkts` | `hw.network.packets` | Counter | `{packet}` | `network.packet.class` for unicast/multicast/broadcast is not semconv yet |
+| `ifHCIn*Pkts` / `ifHCOut*Pkts` | `hw.network.packets` | Counter | `{packet}` | `network.io.cast` for unicast/multicast/broadcast is ours; no convention models it |
 | `ifInErrors` / `ifOutErrors` | `hw.errors` | Counter | `{error}` | `error.type=error` |
-| `ifInDiscards` / `ifOutDiscards` | `hw.errors` | Counter | `{error}` | `error.type=discard`; discards are not strictly errors, flagged for review |
+| `ifInDiscards` / `ifOutDiscards` | `system.network.packet.dropped` | Counter | `{packet}` | A discard is not an error; `hw.*` has no dropped-packet metric |
 | `ifOperStatus` | `hw.network.up` | UpDownCounter | `1` | `up(1)` maps to 1, everything else 0 |
 | `ifAdminStatus` | `hw.status` | UpDownCounter | `1` | State-set: one datapoint per state |
 | `ifHighSpeed` | `hw.network.bandwidth.limit` | UpDownCounter | `By/s` | Mbit/s × 125000 |
@@ -153,6 +166,23 @@ Three mechanics beyond a flat symbol-to-name table:
   attributes — a 32-bit and a 64-bit form of one counter, or `ifSpeed` alongside
   `ifHighSpeed` — priority picks one instead of emitting conflicting duplicate
   series.
+- **Component identity outside `hw.*`.** A component metric with no `hw.*` home
+  still needs to be joinable to the ones that have it, so an entry can opt into
+  emitting `hw.id`, `hw.name` and `network.interface.name`. Interface discards use
+  this.
+
+### Sensor scaling
+
+ENTITY-SENSOR-MIB publishes each sensor's exponent in `entPhySensorScale` (an
+SI-prefix enum where `units(9)` is 10⁰ and each step is three orders of
+magnitude) and `entPhySensorPrecision` (decimal places already folded into the
+integer). Both are applied, so a reading of 425 with precision 1 is 42.5 °C and
+334 with precision 2 is 3.34 V — correct per device, with no divisor to configure.
+
+Cisco's older CISCO-ENTITY-SENSOR-MIB is dispatched the same way, but **without**
+the exponent: `entSensorScale` and `entSensorPrecision` exist in that MIB and no
+shipped profile collects them, so a Cisco device reporting deci-celsius reads ten
+times high until those two columns are added to a profile.
 
 ### Rates
 
@@ -198,8 +228,12 @@ false spike.
 - Registry coverage beyond IF-MIB, ENTITY-SENSOR-MIB and the common UPS symbols
   is incomplete; the remaining vendor symbols resolve to tier 3.
 - `hw.cpu.utilization`, `hw.memory.usage` and `hw.memory.utilization` do not
-  exist upstream. Until they do, the two most-referenced metric families in the
-  profile library have no `hw.*` home.
+  exist upstream, so the two most-referenced metric families in the profile
+  library are reported under `system.*` instead. Proposing them for `hw.*` is
+  still worthwhile; if accepted, this becomes a rename behind a feature gate.
+- `network.io.cast` and the `firewall.*`, `wireless.*` namespaces are ours: no
+  convention models them. They are candidates for upstream proposals.
+- Cisco entity sensors get no exponent, as described under Sensor scaling.
 - Device dedupe currently removes only exact address duplicates; multi-homed
   devices need serial or engine-ID based identity.
 - SNMP traps and LLDP topology are out of scope.

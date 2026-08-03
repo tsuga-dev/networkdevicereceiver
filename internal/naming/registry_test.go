@@ -179,24 +179,15 @@ func TestResolveTypeDispatch(t *testing.T) {
 	}
 }
 
-// TestSystemTierIsOptIn covers the namespace decision: cpu/memory fall back to
-// snmp.* unless the operator opts into system.*.
-func TestSystemTierIsOptIn(t *testing.T) {
-	off := newRegistry(t, DefaultOptions())
-	res := off.Resolve("UCD-SNMP-MIB", sym("cpu.usage"))
-	if !res.Generated {
-		t.Error("cpu.usage should fall back when the system tier is off")
-	}
-	if got := res.Names[0]; got != "snmp.ucd_snmp.cpu.usage" {
-		t.Errorf("fallback name = %q", got)
-	}
+// TestSystemTierIsOnByDefault covers the namespace decision. hw.* defines nothing
+// for cpu or memory utilization, while system.* defines exactly these metrics, so
+// system.* is the default rather than an invented hw.* name or a raw fallback.
+func TestSystemTierIsOnByDefault(t *testing.T) {
+	r := newRegistry(t, DefaultOptions())
 
-	opts := DefaultOptions()
-	opts.SystemNamespaceForDeviceOS = true
-	on := newRegistry(t, opts)
-	res = on.Resolve("UCD-SNMP-MIB", sym("cpu.usage"))
+	res := r.Resolve("UCD-SNMP-MIB", sym("cpu.usage"))
 	if res.Generated {
-		t.Error("cpu.usage should be curated when the system tier is on")
+		t.Error("cpu.usage should be curated by default")
 	}
 	if got := res.Names[0]; got != "system.cpu.utilization" {
 		t.Errorf("metric = %q, want system.cpu.utilization", got)
@@ -204,9 +195,90 @@ func TestSystemTierIsOptIn(t *testing.T) {
 	if res.Entry.Tier != TierSystem {
 		t.Errorf("tier = %d, want 2", res.Entry.Tier)
 	}
-	// SNMP reports a percentage; semconv utilization is a fraction.
+	// SNMP reports a percentage; every semconv utilization is a fraction.
 	if res.Entry.Scale != 0.01 {
 		t.Errorf("scale = %v, want 0.01", res.Entry.Scale)
+	}
+	if res.Entry.Unit != "1" {
+		t.Errorf("unit = %q, want 1", res.Entry.Unit)
+	}
+
+	// Datadog normalises every vendor's CPU and memory OIDs onto the same symbol
+	// names, so these few entries cover all of them.
+	for _, symbol := range []string{"memory.used", "memory.free", "memory.total", "memory.usage"} {
+		if r.Resolve("CISCO-MEMORY-POOL-MIB", sym(symbol)).Generated {
+			t.Errorf("%s should be curated by default", symbol)
+		}
+	}
+	if got := r.Resolve("CISCO-MEMORY-POOL-MIB", sym("memory.used")).Entry.Attributes["system.memory.state"]; got != "used" {
+		t.Errorf("memory.used state attribute = %q, want used", got)
+	}
+}
+
+// TestSystemTierCanBeDisabled keeps the escape hatch working for anyone who reads
+// the system.* "collected from within the target system" rule strictly.
+func TestSystemTierCanBeDisabled(t *testing.T) {
+	opts := DefaultOptions()
+	opts.SystemNamespaceForDeviceOS = false
+	r := newRegistry(t, opts)
+
+	res := r.Resolve("UCD-SNMP-MIB", sym("cpu.usage"))
+	if !res.Generated {
+		t.Error("cpu.usage should fall back when the system tier is disabled")
+	}
+	if got := res.Names[0]; got != "snmp.ucd_snmp.cpu.usage" {
+		t.Errorf("fallback name = %q", got)
+	}
+}
+
+// TestDiscardsAreNotErrors pins the decision that a deliberate drop is not an
+// error: hw.* has no dropped-packet metric, and system.network.packet.dropped is
+// exactly this measurement.
+func TestDiscardsAreNotErrors(t *testing.T) {
+	r := newRegistry(t, DefaultOptions())
+
+	for _, tc := range []struct{ symbol, direction string }{
+		{"ifInDiscards", "receive"},
+		{"ifOutDiscards", "transmit"},
+	} {
+		res := r.Resolve("IF-MIB", sym(tc.symbol))
+		if got := res.Names[0]; got != "system.network.packet.dropped" {
+			t.Errorf("%s -> %q, want system.network.packet.dropped", tc.symbol, got)
+		}
+		if res.Entry.Unit != "{packet}" {
+			t.Errorf("%s unit = %q, want {packet}", tc.symbol, res.Entry.Unit)
+		}
+		if got := res.Entry.Attributes["error.type"]; got != "" {
+			t.Errorf("%s should not carry error.type, got %q", tc.symbol, got)
+		}
+		if got := res.Entry.Attributes["network.io.direction"]; got != tc.direction {
+			t.Errorf("%s direction = %q, want %q", tc.symbol, got, tc.direction)
+		}
+		// Without component identity these could not be joined to hw.network.*.
+		if !res.Entry.ComponentIdentity {
+			t.Errorf("%s needs component_identity to stay joinable", tc.symbol)
+		}
+	}
+
+	// Genuine errors stay on hw.errors, which is where semconv puts them.
+	for _, symbol := range []string{"ifInErrors", "ifOutErrors"} {
+		if got := r.Resolve("IF-MIB", sym(symbol)).Names[0]; got != "hw.errors" {
+			t.Errorf("%s -> %q, want hw.errors", symbol, got)
+		}
+	}
+}
+
+// TestPacketCastAttribute pins the attribute name. Neither hw.* nor
+// system.network.* models the unicast/multicast/broadcast split, so this is ours,
+// and it matches the name already deployed in the demo collector.
+func TestPacketCastAttribute(t *testing.T) {
+	r := newRegistry(t, DefaultOptions())
+	res := r.Resolve("IF-MIB", sym("ifHCInMulticastPkts"))
+	if got := res.Entry.Attributes["network.io.cast"]; got != "multicast" {
+		t.Errorf("network.io.cast = %q, want multicast", got)
+	}
+	if _, stale := res.Entry.Attributes["network.packet.class"]; stale {
+		t.Error("network.packet.class should have been renamed to network.io.cast")
 	}
 }
 

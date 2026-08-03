@@ -29,7 +29,7 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: receive
-      network.packet.class: unicast
+      network.io.cast: unicast
   ifHCOutUcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -37,7 +37,7 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: transmit
-      network.packet.class: unicast
+      network.io.cast: unicast
   ifHCInMulticastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -45,7 +45,7 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: receive
-      network.packet.class: multicast
+      network.io.cast: multicast
   ifHCOutMulticastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -53,7 +53,7 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: transmit
-      network.packet.class: multicast
+      network.io.cast: multicast
   ifHCInBroadcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -61,7 +61,7 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: receive
-      network.packet.class: broadcast
+      network.io.cast: broadcast
   ifHCOutBroadcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -69,7 +69,7 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: transmit
-      network.packet.class: broadcast
+      network.io.cast: broadcast
 
   ifInErrors:
     metric: hw.errors
@@ -87,22 +87,24 @@ metrics:
       hw.type: network
       network.io.direction: transmit
       error.type: error
+  # A discard is a deliberate drop, not an error. hw.* has no dropped-packet
+  # metric; component_identity keeps these joinable to hw.network.* per interface.
   ifInDiscards:
-    metric: hw.errors
+    metric: system.network.packet.dropped
     instrument: sum
-    unit: "{error}"
+    unit: "{packet}"
     attributes:
-      hw.type: network
       network.io.direction: receive
-      error.type: discard
+    component_identity: true
+    tier: 2
   ifOutDiscards:
-    metric: hw.errors
+    metric: system.network.packet.dropped
     instrument: sum
-    unit: "{error}"
+    unit: "{packet}"
     attributes:
-      hw.type: network
       network.io.direction: transmit
-      error.type: discard
+    component_identity: true
+    tier: 2
 
   ifOperStatus:
     metric: hw.network.up
