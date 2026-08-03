@@ -6,9 +6,11 @@
 package report
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tsuga-dev/networkdevicereceiver/internal/profile"
 	"github.com/tsuga-dev/networkdevicereceiver/internal/profiledefinition"
@@ -57,7 +59,25 @@ func stringValue(compiled *profile.Compiled, sym profiledefinition.SymbolConfig,
 		text = string(re.ExpandString(nil, template, text, match))
 	}
 
-	return text, nil
+	return sanitizeText(text), nil
+}
+
+// sanitizeText makes a value safe to put in an OTLP string field.
+//
+// SNMP OCTET STRING is arbitrary bytes, and plenty of columns hold binary rather
+// than text -- a six-byte MAC address being the common case. OTLP string fields
+// must be valid UTF-8, and a backend that validates rejects the *entire* request,
+// so one binary column silently destroys every metric for that device rather
+// than just its own datapoint.
+//
+// Invalid values are hex-encoded, matching how such columns are conventionally
+// rendered (f47f3593af80). A profile wanting colon-separated octets should
+// declare format: mac_address, which runs before this.
+func sanitizeText(text string) string {
+	if utf8.ValidString(text) {
+		return text
+	}
+	return hex.EncodeToString([]byte(text))
 }
 
 // expandTemplate rewrites $1 style references to ${1} so adjacent literal text

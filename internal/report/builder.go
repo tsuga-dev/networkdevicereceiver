@@ -3,7 +3,9 @@ package report
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -319,14 +321,15 @@ func (b *Builder) emitSymbol(pool *metricPool, store *snmp.ValueStore, m *profil
 	resolution := b.registry.Resolve(m.MIB, profiledefinition.SymbolConfig{Name: lookupName})
 	entry := resolution.Entry
 
-	// A sensor column's meaning comes from a sibling column in the same row.
+	// A sensor column's meaning comes from a sibling column in the same row, so
+	// both the target metric and its exponent are per-row.
 	if entry.TypeDispatch != nil {
-		dispatched, err := b.dispatchSensor(entry.TypeDispatch, store, m, index, report)
+		dispatched, err := b.dispatchSensor(resolution.Entry.TypeDispatch, store, m, lookupName, index, report)
 		if err != nil {
 			return err
 		}
-		entry = dispatched
-		resolution.Entry = dispatched
+		resolution = dispatched
+		entry = dispatched.Entry
 	}
 
 	number, err := b.numericValue(m, sym, value, entry)
@@ -392,27 +395,66 @@ func (b *Builder) emitStateSet(pool *metricPool, name string, entry naming.Entry
 	return nil
 }
 
-// dispatchSensor follows a type_dispatch to the entry for this row's sensor kind.
+// dispatchSensor follows a type_dispatch to the resolution for this row's sensor
+// kind, and folds the row's own exponent into the scale.
 func (b *Builder) dispatchSensor(td *naming.TypeDispatch, store *snmp.ValueStore,
-	m *profiledefinition.MetricsConfig, index string, report *BuildReport) (naming.Entry, error) {
+	m *profiledefinition.MetricsConfig, symbolName, index string,
+	report *BuildReport) (naming.Resolution, error) {
 
 	// The sibling type column is found by name among the metric's tags or
 	// symbols, since the profile does not otherwise link them.
 	typeValue, ok := siblingValue(store, td.TypeSymbol, m, index)
 	if !ok {
 		report.SkippedSymbols++
-		return naming.Entry{}, fmt.Errorf("sensor type column %q not collected for row %s", td.TypeSymbol, index)
+		return naming.Resolution{}, fmt.Errorf("sensor type column %q not collected for row %s", td.TypeSymbol, index)
 	}
 	target, ok := td.Cases[typeValue]
 	if !ok {
+		// A sensor kind with no hw.* home, such as percentRH. Skipping is right:
+		// filing it under another metric would corrupt that metric.
 		report.SkippedSymbols++
-		return naming.Entry{}, fmt.Errorf("sensor type %q has no mapping", typeValue)
+		return naming.Resolution{}, fmt.Errorf("sensor type %q has no mapping", typeValue)
 	}
-	entry, ok := b.registry.EntryByName(target)
+
+	resolution, ok := b.registry.ResolveDispatched(symbolName, target)
 	if !ok {
-		return naming.Entry{}, fmt.Errorf("type_dispatch target %q is not a registry entry", target)
+		return naming.Resolution{}, fmt.Errorf("type_dispatch target %q is not a registry entry", target)
 	}
-	return entry, nil
+	// A sensor reporting deci-celsius and one reporting whole degrees both come
+	// out in Cel, without a per-device divisor.
+	resolution.Entry.Scale *= sensorExponent(store, td, m, index)
+	return resolution, nil
+}
+
+// sensorExponent computes the multiplier a sensor row's scale and precision
+// columns imply, returning 1 when the device does not report them.
+//
+// ENTITY-SENSOR-MIB defines EntitySensorDataScale as an SI prefix enum where
+// units(9) is 10^0 and each step is three orders of magnitude, and
+// EntitySensorPrecision as the number of decimal places already folded into the
+// integer value. So a reading of 334 with scale=units and precision=2 is 3.34.
+func sensorExponent(store *snmp.ValueStore, td *naming.TypeDispatch,
+	m *profiledefinition.MetricsConfig, index string) float64 {
+
+	exponent := 0
+	if td.ScaleSymbol != "" {
+		if raw, ok := siblingValue(store, td.ScaleSymbol, m, index); ok {
+			if scale, err := strconv.Atoi(raw); err == nil && scale >= 1 && scale <= 17 {
+				exponent += 3 * (scale - 9)
+			}
+		}
+	}
+	if td.PrecisionSymbol != "" {
+		if raw, ok := siblingValue(store, td.PrecisionSymbol, m, index); ok {
+			if precision, err := strconv.Atoi(raw); err == nil {
+				exponent -= precision
+			}
+		}
+	}
+	if exponent == 0 {
+		return 1
+	}
+	return math.Pow(10, float64(exponent))
 }
 
 // numericValue produces the number to report for a symbol.
@@ -651,7 +693,10 @@ func sanitizeIdent(s string) string {
 // may also be plain.
 func stringValueNoCompile(sym profiledefinition.SymbolConfig, value snmp.ResultValue) (string, error) {
 	if sym.Format != "" {
-		return applyFormat(sym.Format, value)
+		formatted, err := applyFormat(sym.Format, value)
+		return sanitizeText(formatted), err
 	}
-	return value.String(), nil
+	// Inventory fields land in resource attributes, which are subject to the same
+	// UTF-8 requirement as datapoint attributes.
+	return sanitizeText(value.String()), nil
 }
