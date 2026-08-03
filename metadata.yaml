@@ -1,0 +1,18 @@
+type: networkdevice
+
+status:
+  class: receiver
+  stability:
+    alpha: [metrics]
+  distributions: []
+  codeowners:
+    active: []
+
+# Metric names are not declared here because they are not static: they depend on
+# which device profile matches a device and on the naming registry. A Cisco
+# switch and an APC UPS running through this receiver emit different metrics from
+# the same configuration. Use ./cmd/snmpprofilecheck to see what a given profile
+# would produce.
+tests:
+  skip_lifecycle: true
+  skip_shutdown: false

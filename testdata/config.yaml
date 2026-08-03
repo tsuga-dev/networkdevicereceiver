@@ -1,0 +1,44 @@
+receivers:
+  networkdevice:
+    collection_interval: 30s
+    timeout: 2s
+    retries: 1
+    pollers: 25
+    discovery:
+      rediscovery_interval: 15m
+      workers: 4
+      allowed_failures: 5
+      dedupe: true
+    subnets:
+      - network: 10.10.0.0/24
+        version: v2c
+        community: public
+      - network: 10.20.0.0/28
+        port: 1161
+        ignored_addresses:
+          - 10.20.0.1
+        max_hosts: 32
+        authentications:
+          - version: v3
+            user: monitor
+            auth_protocol: SHA256
+            auth_key: authpass
+            priv_protocol: AES
+            priv_key: privpass
+          - version: v2c
+            community: fallback
+    devices:
+      - endpoint: udp://10.9.9.1:161
+        version: v2c
+        community: public
+        profile: cisco-nexus
+    profiles:
+      user_dir: /etc/otelcol/snmp.d/profiles
+    naming:
+      scheme: both
+      fallback_namespace: network.device
+      system_namespace_for_device_os: true
+    fetch:
+      oid_batch_size: 5
+      bulk_max_repetitions: 25
+      max_rows_per_column: 500
