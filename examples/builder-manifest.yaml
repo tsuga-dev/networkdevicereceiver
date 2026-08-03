@@ -1,0 +1,41 @@
+# OpenTelemetry Collector Builder manifest for a distribution including this
+# receiver.
+#
+#   go install go.opentelemetry.io/collector/cmd/builder@v0.157.0
+#   builder --config examples/builder-manifest.yaml
+#   ./_build/otelcol-tsuga --config examples/two-subnets.yaml
+#
+# The collector version below must stay compatible with the versions this
+# module's go.mod pins (stable v1.63.0 / unstable v0.157.0). A mismatch shows up
+# as unresolvable module requirements at build time, not as a clear error.
+
+dist:
+  name: otelcol-tsuga
+  description: Tsuga collector distribution with the SNMP network device receiver
+  output_path: ./_build
+  otelcol_version: 0.157.0
+
+receivers:
+  - gomod: github.com/tsuga-dev/networkdevicereceiver v0.1.0
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.157.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.157.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.157.0
+
+exporters:
+  # debugexporter is what you want while validating device coverage: it prints
+  # the metrics the receiver produced.
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.157.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.157.0
+
+extensions:
+  # Persists the discovered device set, so a restart resumes monitoring instead
+  # of rescanning every subnet first.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.157.0
+
+# While the receiver is unreleased and the repository is private, build against
+# the working copy. Remove this once the module is tagged and reachable, and pin
+# a real version above.
+replaces:
+  - github.com/tsuga-dev/networkdevicereceiver => /Users/antoninbruneau/tsuga/networkdevicereceiver
