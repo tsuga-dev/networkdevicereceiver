@@ -1,20 +1,11 @@
 # Symbol -> OpenTelemetry metric mapping.
 #
-# Verified against open-telemetry/semantic-conventions. The hw.* group is
-# Development status and network.io.direction is Release Candidate, so entries
-# here will need review when those advance; conformance_test.go pins instrument
-# and unit so a drift is a test failure rather than silent breakage.
-#
-# Scope: IF-MIB is curated in full because _generic-if reaches 136 of the 240
-# shipped profiles, plus ENTITY-SENSOR-MIB and the common UPS symbols. The
-# remaining ~2,300 vendor symbols resolve to generated snmp.* names until
-# curated -- that is WS4/D2 and is deliberately incomplete here.
+# Only standard MIBs are mapped, and only symbols the shipped profiles actually
+# collect; corpus_test.go enforces both. Everything else resolves to a generated
+# snmp.* name, which is the honest place for a value whose meaning or magnitude
+# cannot be established.
 
 metrics:
-  # ---------------------------------------------------------------- interfaces
-  # Traffic. Only the 64-bit counters are mapped: no shipped profile collects the
-  # 32-bit ifInOctets/ifOutOctets, so an entry for them would never fire. A user
-  # profile collecting them would land in the fallback tier until one is added.
   ifHCInOctets:
     metric: hw.network.io
     instrument: sum
@@ -30,8 +21,7 @@ metrics:
       hw.type: network
       network.io.direction: transmit
 
-  # Packets. The unicast/multicast/broadcast split has no semconv attribute yet;
-  # network.packet.class is our own and is a candidate for upstream proposal.
+  # The unicast/multicast/broadcast discriminator is ours; no convention models it.
   ifHCInUcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -81,8 +71,6 @@ metrics:
       network.io.direction: transmit
       network.packet.class: broadcast
 
-  # Errors and discards. Discards are not strictly errors; they are folded into
-  # hw.errors with an error.type discriminator, flagged in the design for review.
   ifInErrors:
     metric: hw.errors
     instrument: sum
@@ -116,7 +104,6 @@ metrics:
       network.io.direction: transmit
       error.type: discard
 
-  # Link state. ifOperStatus up(1) is the only healthy value.
   ifOperStatus:
     metric: hw.network.up
     instrument: updowncounter
@@ -124,11 +111,9 @@ metrics:
     attributes:
       hw.type: network
     value_map:
-      "1": 1
+      "1": 1        # up
       default: 0
 
-  # Administrative state as a state set: one datapoint per state, per the
-  # OpenMetrics StateSet pattern hw.status follows.
   ifAdminStatus:
     metric: hw.status
     instrument: updowncounter
@@ -143,19 +128,16 @@ metrics:
         "2": failed   # down
         "3": degraded # testing
 
-  # Bandwidth. Profiles call these gauges; semconv fixes an UpDownCounter, and the
-  # registry wins on instrument type.
-  #
-  # _generic-if collects both of these, and they map to the same metric with the
-  # same attributes, so priority decides: ifHighSpeed wins because ifSpeed
-  # saturates at 4.29 Gbit/s. This is the only such collision in the corpus.
+  # _generic-if collects both, and they map to the same metric and attributes, so
+  # priority decides: ifSpeed saturates at 4.29 Gbit/s. The only such collision in
+  # the corpus.
   ifHighSpeed:
     metric: hw.network.bandwidth.limit
     instrument: updowncounter
     unit: By/s
     attributes:
       hw.type: network
-    scale: 125000        # Mbit/s -> By/s
+    scale: 125000    # Mbit/s -> By/s
     priority: 10
   ifSpeed:
     metric: hw.network.bandwidth.limit
@@ -163,26 +145,27 @@ metrics:
     unit: By/s
     attributes:
       hw.type: network
-    scale: 0.125         # bit/s -> By/s
+    scale: 0.125     # bit/s -> By/s
     priority: 1
 
-  # ------------------------------------------------------------------- sensors
-  # One column whose meaning depends on a sibling column, so it dispatches.
+  # One column whose meaning and magnitude both come from sibling columns.
+  #
+  # Cisco's CISCO-ENTITY-SENSOR-MIB equivalent is deliberately not mapped: no
+  # profile collects its scale and precision columns, so its magnitude cannot be
+  # derived.
   entPhySensorValue:
     type_dispatch:
       type_symbol: entPhySensorType
+      scale_symbol: entPhySensorScale
+      precision_symbol: entPhySensorPrecision
       cases:
         "3": sensor.voltage      # voltsAC
         "4": sensor.voltage      # voltsDC
         "6": sensor.power        # watts
         "8": sensor.temperature  # celsius
         "10": sensor.fan_speed   # rpm
-      # EntitySensorDataScale and EntitySensorPrecision: the device states its own
-      # exponent, so no per-device divisor has to be guessed.
-      scale_symbol: entPhySensorScale
-      precision_symbol: entPhySensorPrecision
 
-  # Dispatch targets. Not symbols themselves, referenced by entPhySensorValue.
+  # Dispatch targets, not symbols.
   sensor.temperature:
     metric: hw.temperature
     instrument: gauge
@@ -206,121 +189,47 @@ metrics:
     attributes:
       hw.type: fan
 
-  # ----------------------------------------------------------------------- UPS
   upsEstimatedMinutesRemaining:
     metric: hw.battery.time_left
     instrument: gauge
     unit: s
     attributes:
       hw.type: battery
-    scale: 60            # minutes -> seconds
-  upsBatteryVoltage:
-    metric: hw.voltage
-    instrument: gauge
-    unit: V
-    attributes:
-      hw.type: voltage
-  upsBatteryTemperature:
-    metric: hw.temperature
-    instrument: gauge
-    unit: Cel
-    attributes:
-      hw.type: temperature
-  upsAdvBatteryCapacity:
-    metric: hw.battery.charge
-    instrument: gauge
-    unit: "1"
-    attributes:
-      hw.type: battery
-    scale: 0.01          # percent -> fraction
-  upsHighPrecInputLineVoltage:
-    metric: hw.voltage
-    instrument: gauge
-    unit: V
-    attributes:
-      hw.type: voltage
-    scale: 0.1
-
+    scale: 60        # minutes -> seconds
   upsEstimatedChargeRemaining:
     metric: hw.battery.charge
     instrument: gauge
     unit: "1"
     attributes:
       hw.type: battery
-    scale: 0.01          # percent -> fraction
-  upsOutputFrequency:
-    metric: hw.frequency
-    instrument: gauge
-    unit: Hz
-    scale: 0.1           # UPS-MIB reports tenths of a hertz
-
-  # Vendor MIBs that merely duplicate a standard one are deliberately not mapped:
-  # CISCO-ENTITY-SENSOR-MIB's entSensorValue mirrors ENTITY-SENSOR-MIB's
-  # entPhySensorValue, but no shipped profile collects its entSensorScale or
-  # entSensorPrecision columns, so its magnitude cannot be derived. Emitting
-  # hw.temperature from it would be wrong by a factor of ten on any device
-  # reporting deci-celsius, whereas the generated snmp.* name is merely unmodelled.
-  # Same for CISCO-ENVMON-MIB component states. Both stay in the fallback tier.
-
-  # ------------------------------------------------------------------- firewall
-  # No semantic convention covers firewall session or tunnel capacity, so these
-  # names are ours. They match the demo NDM collector's, which is where they were
-  # first used.
-  panSessionActiveTcp:
-    metric: firewall.sessions.usage
-    instrument: gauge
-    unit: "{session}"
-    attributes:
-      network.transport: tcp
-  panSessionActiveUdp:
-    metric: firewall.sessions.usage
-    instrument: gauge
-    unit: "{session}"
-    attributes:
-      network.transport: udp
-  panSessionActiveICMP:
-    metric: firewall.sessions.usage
-    instrument: gauge
-    unit: "{session}"
-    attributes:
-      network.transport: icmp
-  panSessionMax:
-    metric: firewall.sessions.limit
-    instrument: updowncounter
-    unit: "{session}"
-  panSessionUtilization:
-    metric: firewall.sessions.utilization
+    scale: 0.01      # percent -> fraction
+  upsAdvBatteryCapacity:
+    metric: hw.battery.charge
     instrument: gauge
     unit: "1"
-    scale: 0.01          # percent -> fraction, as semconv does for utilization
-  panGPGWUtilizationActiveTunnels:
-    metric: firewall.vpn.tunnels.usage
-    instrument: gauge
-    unit: "{tunnel}"
-  panGPGWUtilizationMaxTunnels:
-    metric: firewall.vpn.tunnels.limit
-    instrument: updowncounter
-    unit: "{tunnel}"
-  panGPGWUtilizationPct:
-    metric: firewall.vpn.tunnels.utilization
-    instrument: gauge
-    unit: "1"
+    attributes:
+      hw.type: battery
     scale: 0.01
+  upsBatteryVoltage:
+    metric: hw.voltage
+    instrument: gauge
+    unit: V
+    attributes:
+      hw.type: voltage
+  upsHighPrecInputLineVoltage:
+    metric: hw.voltage
+    instrument: gauge
+    unit: V
+    attributes:
+      hw.type: voltage
+    scale: 0.1       # tenths of a volt
+  upsBatteryTemperature:
+    metric: hw.temperature
+    instrument: gauge
+    unit: Cel
+    attributes:
+      hw.type: temperature
 
-  # ------------------------------------------------------------------- wireless
-  # Also unmodelled by semconv; names match the demo collector's.
-  wlsxSwitchTotalNumAccessPoints:
-    metric: wireless.access_point.count
-    instrument: updowncounter
-    unit: "{access_point}"
-  wlsxSwitchTotalNumStationsAssociated:
-    metric: wireless.client.count
-    instrument: updowncounter
-    unit: "{client}"
-
-  # --------------------------------------------------------------- host and L4
-  # tcpCurrEstab is the count of established connections. semconv spells this
-  # system.network.connection.count with a network.transport attribute.
   tcpCurrEstab:
     metric: system.network.connection.count
     instrument: updowncounter
@@ -329,27 +238,23 @@ metrics:
       network.transport: tcp
       network.connection.state: established
     tier: 2
-  # HOST-RESOURCES-MIB uptime is TimeTicks, hundredths of a second.
   hrSystemUptime:
     metric: system.uptime
     instrument: gauge
     unit: s
-    scale: 0.01
+    scale: 0.01      # TimeTicks -> seconds
     tier: 2
 
-# Tier 2: device-OS metrics, emitted only when
-# naming.system_namespace_for_device_os is enabled.
-#
-# cpu.usage and memory.* are the two most-referenced families in the whole
-# profile library (61 and 36+25+24+17 profiles) and hw.* has no home for either.
-# Default is the generated snmp.* name; this section is the opt-in, and the real
-# fix is an upstream proposal for hw.cpu.utilization / hw.memory.usage.
+# Device-OS metrics, gated by naming.system_namespace_for_device_os. hw.* defines
+# nothing for cpu or memory utilization; these system.* metrics are exactly the
+# right shapes. Datadog normalises every vendor's OIDs onto these symbol names, so
+# a handful of entries covers the whole library.
 system_metrics:
   cpu.usage:
     metric: system.cpu.utilization
     instrument: gauge
     unit: "1"
-    scale: 0.01          # percent -> fraction
+    scale: 0.01      # percent -> fraction
   memory.usage:
     metric: system.memory.utilization
     instrument: gauge
