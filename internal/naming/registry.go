@@ -14,6 +14,11 @@
 // and are stable because they derive only from the MIB and symbol names.
 package naming
 
+// The per-metric reference in documentation.md is generated from registry.yaml,
+// so a mapping and its documentation cannot drift. Run this after changing one.
+//
+//go:generate go run ./gendoc
+
 import (
 	"embed"
 	"fmt"

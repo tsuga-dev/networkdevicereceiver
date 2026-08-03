@@ -1,4 +1,4 @@
-[comment]: <> (Hand-maintained. This receiver's metrics are not static, so mdatagen cannot generate this file — see the note below.)
+[comment]: <> (Partly generated. The per-metric reference between the markers below comes from internal/naming/registry.yaml via `go generate ./...`; everything else is hand-written.)
 
 # networkdevice
 
@@ -6,13 +6,15 @@
 
 Metric names are not fixed by the receiver. What a device emits depends on which
 profile matched its `sysObjectID` and on which symbols that profile collects, so
-`metadata.yaml` declares no metrics and this file is written by hand.
+`metadata.yaml` declares no metrics and mdatagen cannot generate this file.
 
 What *is* fixed is the mapping: a given profile symbol always resolves to the
 same metric name, unit, instrument and attributes. That mapping lives in
-[`internal/naming/registry.yaml`](./internal/naming/registry.yaml) and is
-documented below, followed by the transformations applied on the way from an
-SNMP PDU to a datapoint.
+[`internal/naming/registry.yaml`](./internal/naming/registry.yaml), and the
+[Metrics](#metrics) section below is generated from it — including each metric's
+description and notes, which are kept in that file's `metric_docs` section.
+Everything after it is hand-written, because the transformations and the fallback
+naming rules are not expressible as registry data.
 
 To see what a specific profile would produce:
 
@@ -25,8 +27,94 @@ counters are converted through `float64` and scale factors may be fractional.
 
 ## Metrics
 
-Curated mappings, grouped by emitted metric name. Symbols not listed here resolve
-to a generated name — see [Generated metrics](#generated-metrics).
+Curated mappings, one subsection per emitted metric, listing every profile symbol
+that feeds it. Symbols not listed here are still emitted, under a generated name —
+see [Unmapped symbols](#unmapped-symbols).
+
+Some source names are Datadog's normalised symbol names rather than MIB object
+names. The profile library already maps every vendor's CPU and memory OIDs onto
+them, so Cisco's `cpmCPUTotal5minRev` and HOST-RESOURCES' `hrProcessorLoad` both
+arrive as `cpu.usage`, and a handful of entries covers the whole library.
+
+<!-- BEGIN GENERATED: metrics -->
+
+### hw.battery.charge
+
+UPS battery charge remaining, as a fraction of capacity.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| 1 | Gauge | Double | n/a |
+
+| Source symbol | Attributes | Scale |
+| --- | --- | --- |
+| `upsAdvBatteryCapacity` | `hw.type=battery` | × 0.01 |
+| `upsEstimatedChargeRemaining` | `hw.type=battery` | × 0.01 |
+
+Both symbols report a percentage, scaled here to the fraction the
+convention's unit requires.
+
+### hw.battery.time_left
+
+Estimated UPS runtime remaining on battery.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| s | Gauge | Double | n/a |
+
+| Source symbol | Attributes | Scale |
+| --- | --- | --- |
+| `upsEstimatedMinutesRemaining` | `hw.type=battery` | × 60 |
+
+`upsEstimatedMinutesRemaining` reports minutes.
+
+### hw.errors
+
+Interface errors.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| {error} | Sum | Double | true |
+
+| Source symbol | Attributes |
+| --- | --- |
+| `ifInErrors` | `error.type=error`, `hw.type=network`, `network.io.direction=receive` |
+| `ifOutErrors` | `error.type=error`, `hw.type=network`, `network.io.direction=transmit` |
+
+A discard is a deliberate drop rather than an error, and is reported
+separately as `system.network.packet.dropped`.
+
+### hw.fan.speed
+
+Fan speed, from an entity sensor.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| rpm | Gauge | Double | n/a |
+
+| Source symbol | Condition | Attributes | Scale |
+| --- | --- | --- | --- |
+| `entPhySensorValue` | `entPhySensorType` = `10` | `hw.type=fan` | per-row, from `entPhySensorScale` and `entPhySensorPrecision` |
+
+### hw.network.bandwidth.limit
+
+Interface capacity.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| By/s | Sum | Double | false |
+
+| Source symbol | Attributes | Scale | Priority |
+| --- | --- | --- | --- |
+| `ifHighSpeed` | `hw.type=network` | × 125000 | 10 |
+| `ifSpeed` | `hw.type=network` | × 0.125 | 1 |
+
+`ifHighSpeed` reports Mbit/s and `ifSpeed` bit/s. Where a profile collects
+both they map to the same metric and the same attributes, so priority
+decides: `ifSpeed` saturates at 4.29 Gbit/s.
+
+The declared instrument overrides the profile here. Profiles call these
+gauges, but the conventions fix this metric as an UpDownCounter.
 
 ### hw.network.io
 
@@ -43,7 +131,7 @@ Bytes transferred on a physical interface.
 
 ### hw.network.packets
 
-Packets transferred, split by packet class.
+Packets transferred on a physical interface, split by packet class.
 
 | Unit | Metric Type | Value Type | Monotonic |
 | ---- | ----------- | ---------- | --------- |
@@ -51,29 +139,15 @@ Packets transferred, split by packet class.
 
 | Source symbol | Attributes |
 | --- | --- |
-| `ifHCInUcastPkts` | `hw.type=network`, `network.io.direction=receive`, `network.io.cast=unicast` |
-| `ifHCOutUcastPkts` | `hw.type=network`, `network.io.direction=transmit`, `network.io.cast=unicast` |
-| `ifHCInMulticastPkts` | `hw.type=network`, `network.io.direction=receive`, `network.io.cast=multicast` |
-| `ifHCOutMulticastPkts` | `hw.type=network`, `network.io.direction=transmit`, `network.io.cast=multicast` |
-| `ifHCInBroadcastPkts` | `hw.type=network`, `network.io.direction=receive`, `network.io.cast=broadcast` |
-| `ifHCOutBroadcastPkts` | `hw.type=network`, `network.io.direction=transmit`, `network.io.cast=broadcast` |
+| `ifHCInBroadcastPkts` | `hw.type=network`, `network.io.cast=broadcast`, `network.io.direction=receive` |
+| `ifHCInMulticastPkts` | `hw.type=network`, `network.io.cast=multicast`, `network.io.direction=receive` |
+| `ifHCInUcastPkts` | `hw.type=network`, `network.io.cast=unicast`, `network.io.direction=receive` |
+| `ifHCOutBroadcastPkts` | `hw.type=network`, `network.io.cast=broadcast`, `network.io.direction=transmit` |
+| `ifHCOutMulticastPkts` | `hw.type=network`, `network.io.cast=multicast`, `network.io.direction=transmit` |
+| `ifHCOutUcastPkts` | `hw.type=network`, `network.io.cast=unicast`, `network.io.direction=transmit` |
 
 `network.io.cast` is not a semantic convention; no convention models the
 unicast/multicast/broadcast split.
-
-### hw.errors
-
-Interface errors. A discard is deliberate and is reported separately, as
-`system.network.packet.dropped`.
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| {error} | Sum | Double | true |
-
-| Source symbol | Attributes |
-| --- | --- |
-| `ifInErrors` | `hw.type=network`, `network.io.direction=receive`, `error.type=error` |
-| `ifOutErrors` | `hw.type=network`, `network.io.direction=transmit`, `error.type=error` |
 
 ### hw.network.up
 
@@ -85,12 +159,24 @@ Interface operational state as a boolean.
 
 | Source symbol | Attributes | Value mapping |
 | --- | --- | --- |
-| `ifOperStatus` | `hw.type=network` | `1` (up) → `1`; anything else → `0` |
+| `ifOperStatus` | `hw.type=network` | `1` → 1, anything else → 0 |
+
+### hw.power
+
+Power drawn, from an entity sensor.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| W | Gauge | Double | n/a |
+
+| Source symbol | Condition | Scale |
+| --- | --- | --- |
+| `entPhySensorValue` | `entPhySensorType` = `6` | per-row, from `entPhySensorScale` and `entPhySensorPrecision` |
 
 ### hw.status
 
-Interface administrative state, as an OpenMetrics StateSet: one datapoint per
-possible state, `1` for the active one and `0` for the rest.
+Interface administrative state, as an OpenMetrics StateSet: one datapoint
+per possible state, 1 for the active one and 0 for the rest.
 
 | Unit | Metric Type | Value Type | Monotonic |
 | ---- | ----------- | ---------- | --------- |
@@ -98,33 +184,166 @@ possible state, `1` for the active one and `0` for the rest.
 
 | Source symbol | Attributes | State mapping |
 | --- | --- | --- |
-| `ifAdminStatus` | `hw.type=network`, `hw.state` ∈ {`ok`, `degraded`, `failed`} | `1` (up) → `ok`; `2` (down) → `failed`; `3` (testing) → `degraded` |
+| `ifAdminStatus` | `hw.type=network`, `hw.state` ∈ {`ok`, `degraded`, `failed`} | `1` → `ok`, `2` → `failed`, `3` → `degraded` |
 
-A value outside the mapping yields all-zero datapoints rather than none, so a
-device in an unexpected state reads as "no known state active" instead of
+A value outside the mapping yields all-zero datapoints rather than none, so
+a device in an unexpected state reads as "no known state active" instead of
 dropping out of the series.
 
-### hw.network.bandwidth.limit
+### hw.temperature
 
-Interface capacity. Two symbols map here; `priority` decides which wins when a
-profile collects both, since `ifSpeed` saturates at 4.29 Gbit/s.
+Temperature, from an entity sensor or a UPS battery.
 
 | Unit | Metric Type | Value Type | Monotonic |
 | ---- | ----------- | ---------- | --------- |
-| By/s | Sum | Double | false |
+| Cel | Gauge | Double | n/a |
 
-| Source symbol | Attributes | Scale | Priority |
+| Source symbol | Condition | Attributes | Scale |
 | --- | --- | --- | --- |
-| `ifHighSpeed` | `hw.type=network` | × 125000 (Mbit/s → By/s) | 10 |
-| `ifSpeed` | `hw.type=network` | × 0.125 (bit/s → By/s) | 1 |
+| `entPhySensorValue` | `entPhySensorType` = `8` | `hw.type=temperature` | per-row, from `entPhySensorScale` and `entPhySensorPrecision` |
+| `upsBatteryTemperature` |  | `hw.type=temperature` |  |
 
-The declared instrument overrides the profile: profiles call these gauges, but
-the conventions fix `hw.network.bandwidth.limit` as an UpDownCounter.
+### hw.voltage
+
+Voltage, from an entity sensor, a UPS battery or a UPS input line.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| V | Gauge | Double | n/a |
+
+| Source symbol | Condition | Attributes | Scale |
+| --- | --- | --- | --- |
+| `entPhySensorValue` | `entPhySensorType` = `3` | `hw.type=voltage` | per-row, from `entPhySensorScale` and `entPhySensorPrecision` |
+| `entPhySensorValue` | `entPhySensorType` = `4` | `hw.type=voltage` | per-row, from `entPhySensorScale` and `entPhySensorPrecision` |
+| `upsBatteryVoltage` |  | `hw.type=voltage` |  |
+| `upsHighPrecInputLineVoltage` |  | `hw.type=voltage` | × 0.1 |
+
+`upsHighPrecInputLineVoltage` reports tenths of a volt.
+
+### system.cpu.utilization
+
+Device CPU utilisation, as a fraction.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| 1 | Gauge | Double | n/a |
+
+| Source symbol | Scale |
+| --- | --- |
+| `cpu.usage` | × 0.01 |
+
+Emitted only when `naming.system_namespace_for_device_os` is `true`, its
+default. Set it to `false` and these symbols resolve to generated `snmp.*`
+names instead.
+
+The symbol reports a percentage, scaled here to a fraction.
+
+### system.memory.limit
+
+Total device memory.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| By | Sum | Double | false |
+
+| Source symbol |
+| --- |
+| `memory.total` |
+
+Emitted only when `naming.system_namespace_for_device_os` is `true`, its
+default. Set it to `false` and these symbols resolve to generated `snmp.*`
+names instead.
+
+### system.memory.usage
+
+Device memory, by state.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| By | Sum | Double | false |
+
+| Source symbol | Attributes |
+| --- | --- |
+| `memory.free` | `system.memory.state=free` |
+| `memory.used` | `system.memory.state=used` |
+
+Emitted only when `naming.system_namespace_for_device_os` is `true`, its
+default. Set it to `false` and these symbols resolve to generated `snmp.*`
+names instead.
+
+### system.memory.utilization
+
+Device memory utilisation, as a fraction.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| 1 | Gauge | Double | n/a |
+
+| Source symbol | Scale |
+| --- | --- |
+| `memory.usage` | × 0.01 |
+
+Emitted only when `naming.system_namespace_for_device_os` is `true`, its
+default. Set it to `false` and these symbols resolve to generated `snmp.*`
+names instead.
+
+The symbol reports a percentage, scaled here to a fraction.
+
+### system.network.connection.count
+
+Established TCP connections.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| {connection} | Sum | Double | false |
+
+| Source symbol | Attributes |
+| --- | --- |
+| `tcpCurrEstab` | `network.connection.state=established`, `network.transport=tcp` |
+
+### system.network.packet.dropped
+
+Interface discards.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| {packet} | Sum | Double | true |
+
+| Source symbol | Attributes |
+| --- | --- |
+| `ifInDiscards` | `network.io.direction=receive` |
+| `ifOutDiscards` | `network.io.direction=transmit` |
+
+`hw.*` models no dropped-packet metric, so these live under `system.*` but
+opt into the component-identity attributes (`hw.id`, `hw.name` and
+`network.interface.name`), which keeps them joinable to the `hw.network.*`
+metrics for the same interface.
+
+### system.uptime
+
+Time since the device's host resources were last initialised.
+
+| Unit | Metric Type | Value Type | Monotonic |
+| ---- | ----------- | ---------- | --------- |
+| s | Gauge | Double | n/a |
+
+| Source symbol | Scale |
+| --- | --- |
+| `hrSystemUptime` | × 0.01 |
+
+`hrSystemUptime` reports TimeTicks, hundredths of a second.
+
+<!-- END GENERATED: metrics -->
+
+## Derived metrics
+
+Computed by the receiver rather than mapped from a symbol, so they have no
+registry entry.
 
 ### hw.network.bandwidth.utilization
 
-Derived, not collected: the octet-counter delta since the previous poll divided
-by the interface's capacity. A **fraction**, not a percentage.
+The octet-counter delta since the previous poll divided by the interface's
+capacity. A **fraction**, not a percentage.
 
 | Unit | Metric Type | Value Type | Monotonic |
 | ---- | ----------- | ---------- | --------- |
@@ -150,158 +369,7 @@ This is the one rate computed receiver-side, because it needs a join between two
 tables that a metrics backend cannot easily express. See
 [Rates](#rates-and-counters).
 
-### hw.temperature
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| Cel | Gauge | Double | n/a |
-
-| Source symbol | Attributes | Scale |
-| --- | --- | --- |
-| `entPhySensorValue` where `entPhySensorType` = `8` (celsius) | `hw.type=temperature` | per-row, from the sensor's scale and precision columns |
-| `upsBatteryTemperature` | `hw.type=temperature` | — |
-
-### hw.voltage
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| V | Gauge | Double | n/a |
-
-| Source symbol | Attributes | Scale |
-| --- | --- | --- |
-| `entPhySensorValue` where `entPhySensorType` ∈ {`3` voltsAC, `4` voltsDC} | `hw.type=voltage` | per-row, from the sensor's scale and precision columns |
-| `upsBatteryVoltage` | `hw.type=voltage` | — |
-| `upsHighPrecInputLineVoltage` | `hw.type=voltage` | × 0.1 (tenths of a volt) |
-
-### hw.power
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| W | Gauge | Double | n/a |
-
-| Source symbol | Attributes | Scale |
-| --- | --- | --- |
-| `entPhySensorValue` where `entPhySensorType` = `6` (watts) | — | per-row, from the sensor's scale and precision columns |
-
-### hw.fan.speed
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| rpm | Gauge | Double | n/a |
-
-| Source symbol | Attributes | Scale |
-| --- | --- | --- |
-| `entPhySensorValue` where `entPhySensorType` = `10` (rpm) | `hw.type=fan` | per-row, from the sensor's scale and precision columns |
-
-### hw.battery.charge
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| 1 | Gauge | Double | n/a |
-
-| Source symbol | Attributes | Scale |
-| --- | --- | --- |
-| `upsEstimatedChargeRemaining` | `hw.type=battery` | × 0.01 (percent → fraction) |
-| `upsAdvBatteryCapacity` | `hw.type=battery` | × 0.01 (percent → fraction) |
-
-### hw.battery.time_left
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| s | Gauge | Double | n/a |
-
-| Source symbol | Attributes | Scale |
-| --- | --- | --- |
-| `upsEstimatedMinutesRemaining` | `hw.type=battery` | × 60 (minutes → seconds) |
-
-### system.network.packet.dropped
-
-Interface discards. `hw.*` models no dropped-packet metric, so these live under
-`system.*` but opt into the component-identity attributes (`hw.id`, `hw.name`,
-`network.interface.name`) so they remain joinable to the `hw.network.*` metrics
-for the same interface.
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| {packet} | Sum | Double | true |
-
-| Source symbol | Attributes |
-| --- | --- |
-| `ifInDiscards` | `network.io.direction=receive` |
-| `ifOutDiscards` | `network.io.direction=transmit` |
-
-### system.network.connection.count
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| {connection} | Sum | Double | false |
-
-| Source symbol | Attributes |
-| --- | --- |
-| `tcpCurrEstab` | `network.transport=tcp`, `network.connection.state=established` |
-
-### system.uptime
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| s | Gauge | Double | n/a |
-
-| Source symbol | Scale |
-| --- | --- |
-| `hrSystemUptime` | × 0.01 (TimeTicks → seconds) |
-
-### Device-OS metrics
-
-Emitted only when `naming.system_namespace_for_device_os` is `true`, its default.
-Set it to `false` and these symbols resolve to generated `snmp.*` names instead.
-
-The source names are Datadog's normalised symbol names, not MIB object names: the
-profile library already maps every vendor's CPU and memory OIDs onto them, so
-Cisco's `cpmCPUTotal5minRev` and HOST-RESOURCES' `hrProcessorLoad` both arrive as
-`cpu.usage`.
-
-#### system.cpu.utilization
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| 1 | Gauge | Double | n/a |
-
-| Source symbol | Scale |
-| --- | --- |
-| `cpu.usage` | × 0.01 (percent → fraction) |
-
-#### system.memory.utilization
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| 1 | Gauge | Double | n/a |
-
-| Source symbol | Scale |
-| --- | --- |
-| `memory.usage` | × 0.01 (percent → fraction) |
-
-#### system.memory.usage
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| By | Sum | Double | false |
-
-| Source symbol | Attributes |
-| --- | --- |
-| `memory.used` | `system.memory.state=used` |
-| `memory.free` | `system.memory.state=free` |
-
-#### system.memory.limit
-
-| Unit | Metric Type | Value Type | Monotonic |
-| ---- | ----------- | ---------- | --------- |
-| By | Sum | Double | false |
-
-| Source symbol |
-| --- |
-| `memory.total` |
-
-### Generated metrics
+## Unmapped symbols
 
 A symbol with no registry entry is still emitted, under a name derived from its
 MIB and symbol name:
@@ -326,10 +394,10 @@ Generated names depend only on the MIB and symbol names, so they are stable
 across upstream profile syncs. Renaming one is a breaking change and goes behind
 a feature gate.
 
-Generated metrics carry the profile's tags as attributes, but no
-convention-defined attributes and no `hw.*` component identity — the receiver
-does not claim to know what they mean. The unit is empty and the instrument is
-inferred; see [Instrument selection](#instrument-selection).
+These metrics carry the profile's tags as attributes, but no convention-defined
+attributes and no `hw.*` component identity — the receiver does not claim to know
+what they mean. The unit is empty and the instrument is inferred; see
+[Instrument selection](#instrument-selection).
 
 Each build reports the distinct generated names it produced, which is how
 `snmpprofilecheck -coverage` measures the curation gap for a profile.
@@ -460,8 +528,16 @@ This is the OpenMetrics StateSet representation the `hw.status` convention uses.
 
 `entPhySensorValue` is one column whose meaning depends on the sibling
 `entPhySensorType` column in the same row, so the target metric is resolved per
-row through the `cases` table shown under [hw.temperature](#hwtemperature) and
-friends.
+row. The dispatch values that appear in the tables above are ENTITY-SENSOR-MIB's
+`EntitySensorDataType` enum:
+
+| `entPhySensorType` | Meaning | Metric |
+| --- | --- | --- |
+| `3` | voltsAC | `hw.voltage` |
+| `4` | voltsDC | `hw.voltage` |
+| `6` | watts | `hw.power` |
+| `8` | celsius | `hw.temperature` |
+| `10` | rpm | `hw.fan.speed` |
 
 A row whose type has no case — `percentRH`, say — is skipped and counted, not
 filed under another metric.
@@ -502,8 +578,9 @@ from the profile's `metric_type` — a symbol-level one overriding its metric's:
 | anything else, or unset | Sum if the SNMP type is Counter32/Counter64, else Gauge |
 
 A metric name must keep one instrument kind within a scope. Two symbols
-disagreeing is a registry error and fails the build for that device rather than
-silently mixing them.
+disagreeing is a registry error: `go generate ./...` refuses to write this file,
+and at runtime it fails the build for that device rather than silently mixing
+them.
 
 ### Duplicate streams and priority
 
