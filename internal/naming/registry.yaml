@@ -12,9 +12,9 @@
 
 metrics:
   # ---------------------------------------------------------------- interfaces
-  # Traffic. The 64-bit and 32-bit counters map to the same metric and the same
-  # attributes, so priority decides: a device answering both yields one stream
-  # per direction, taken from the 64-bit counter.
+  # Traffic. Only the 64-bit counters are mapped: no shipped profile collects the
+  # 32-bit ifInOctets/ifOutOctets, so an entry for them would never fire. A user
+  # profile collecting them would land in the fallback tier until one is added.
   ifHCInOctets:
     metric: hw.network.io
     instrument: sum
@@ -22,7 +22,6 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: receive
-    priority: 10
   ifHCOutOctets:
     metric: hw.network.io
     instrument: sum
@@ -30,23 +29,6 @@ metrics:
     attributes:
       hw.type: network
       network.io.direction: transmit
-    priority: 10
-  ifInOctets:
-    metric: hw.network.io
-    instrument: sum
-    unit: By
-    attributes:
-      hw.type: network
-      network.io.direction: receive
-    priority: 1
-  ifOutOctets:
-    metric: hw.network.io
-    instrument: sum
-    unit: By
-    attributes:
-      hw.type: network
-      network.io.direction: transmit
-    priority: 1
 
   # Packets. The unicast/multicast/broadcast split has no semconv attribute yet;
   # network.packet.class is our own and is a candidate for upstream proposal.
@@ -58,7 +40,6 @@ metrics:
       hw.type: network
       network.io.direction: receive
       network.packet.class: unicast
-    priority: 10
   ifHCOutUcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -67,7 +48,6 @@ metrics:
       hw.type: network
       network.io.direction: transmit
       network.packet.class: unicast
-    priority: 10
   ifHCInMulticastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -76,7 +56,6 @@ metrics:
       hw.type: network
       network.io.direction: receive
       network.packet.class: multicast
-    priority: 10
   ifHCOutMulticastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -85,7 +64,6 @@ metrics:
       hw.type: network
       network.io.direction: transmit
       network.packet.class: multicast
-    priority: 10
   ifHCInBroadcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -94,7 +72,6 @@ metrics:
       hw.type: network
       network.io.direction: receive
       network.packet.class: broadcast
-    priority: 10
   ifHCOutBroadcastPkts:
     metric: hw.network.packets
     instrument: sum
@@ -103,25 +80,6 @@ metrics:
       hw.type: network
       network.io.direction: transmit
       network.packet.class: broadcast
-    priority: 10
-  ifInUcastPkts:
-    metric: hw.network.packets
-    instrument: sum
-    unit: "{packet}"
-    attributes:
-      hw.type: network
-      network.io.direction: receive
-      network.packet.class: unicast
-    priority: 1
-  ifOutUcastPkts:
-    metric: hw.network.packets
-    instrument: sum
-    unit: "{packet}"
-    attributes:
-      hw.type: network
-      network.io.direction: transmit
-      network.packet.class: unicast
-    priority: 1
 
   # Errors and discards. Discards are not strictly errors; they are folded into
   # hw.errors with an error.type discriminator, flagged in the design for review.
@@ -185,8 +143,12 @@ metrics:
         "2": failed   # down
         "3": degraded # testing
 
-  # Bandwidth. Profiles call these gauges; semconv fixes an UpDownCounter, and
-  # the registry wins on instrument type.
+  # Bandwidth. Profiles call these gauges; semconv fixes an UpDownCounter, and the
+  # registry wins on instrument type.
+  #
+  # _generic-if collects both of these, and they map to the same metric with the
+  # same attributes, so priority decides: ifHighSpeed wins because ifSpeed
+  # saturates at 4.29 Gbit/s. This is the only such collision in the corpus.
   ifHighSpeed:
     metric: hw.network.bandwidth.limit
     instrument: updowncounter
@@ -292,71 +254,13 @@ metrics:
     unit: Hz
     scale: 0.1           # UPS-MIB reports tenths of a hertz
 
-  # ------------------------------------------------------- Cisco entity sensors
-  # CISCO-ENTITY-SENSOR-MIB predates the standard one and many Cisco devices only
-  # populate this table. Same data types, so it dispatches to the same targets.
-  #
-  # entSensorScale and entSensorPrecision exist in the MIB but no shipped profile
-  # collects them, so no exponent can be applied here: a device reporting
-  # deci-celsius will read ten times high until those columns are added to a
-  # profile. See the README.
-  entSensorValue:
-    type_dispatch:
-      type_symbol: entSensorType
-      cases:
-        "3": sensor.voltage      # voltsAC
-        "4": sensor.voltage      # voltsDC
-        "6": sensor.power        # watts
-        "8": sensor.temperature  # celsius
-        "10": sensor.fan_speed   # rpm
-
-  # CISCO-ENVMON-MIB component health. Values 1 normal, 2 warning, 3 critical,
-  # 4 shutdown, 5 notPresent, 6 notFunctioning.
-  ciscoEnvMonFanState:
-    metric: hw.status
-    instrument: updowncounter
-    unit: "1"
-    attributes:
-      hw.type: fan
-    state_set:
-      attribute: hw.state
-      states: [ok, degraded, failed]
-      map:
-        "1": ok
-        "2": degraded
-        "3": failed
-        "4": failed
-        "6": failed
-  ciscoEnvMonSupplyState:
-    metric: hw.status
-    instrument: updowncounter
-    unit: "1"
-    attributes:
-      hw.type: power_supply
-    state_set:
-      attribute: hw.state
-      states: [ok, degraded, failed]
-      map:
-        "1": ok
-        "2": degraded
-        "3": failed
-        "4": failed
-        "6": failed
-  ciscoEnvMonTemperatureState:
-    metric: hw.status
-    instrument: updowncounter
-    unit: "1"
-    attributes:
-      hw.type: temperature
-    state_set:
-      attribute: hw.state
-      states: [ok, degraded, failed]
-      map:
-        "1": ok
-        "2": degraded
-        "3": failed
-        "4": failed
-        "6": failed
+  # Vendor MIBs that merely duplicate a standard one are deliberately not mapped:
+  # CISCO-ENTITY-SENSOR-MIB's entSensorValue mirrors ENTITY-SENSOR-MIB's
+  # entPhySensorValue, but no shipped profile collects its entSensorScale or
+  # entSensorPrecision columns, so its magnitude cannot be derived. Emitting
+  # hw.temperature from it would be wrong by a factor of ten on any device
+  # reporting deci-celsius, whereas the generated snmp.* name is merely unmodelled.
+  # Same for CISCO-ENVMON-MIB component states. Both stay in the fallback tier.
 
   # ------------------------------------------------------------------- firewall
   # No semantic convention covers firewall session or tunnel capacity, so these
