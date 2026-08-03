@@ -72,68 +72,43 @@ func dispatchTargets(r *Registry) map[string]struct{} {
 // TestEveryCuratedSymbolIsCollected keeps the registry honest: an entry for a
 // symbol no profile collects is dead weight that overstates coverage, and it will
 // never fire no matter how the device is configured.
+//
+// The same applies to a dispatch's sibling columns, which is the lesson from
+// mapping Cisco's entity sensors: dispatching a sensor to hw.temperature without
+// its scale and precision columns reports the wrong magnitude, which is worse than
+// reporting it under a generated name.
 func TestEveryCuratedSymbolIsCollected(t *testing.T) {
 	r := newRegistry(t, DefaultOptions())
 	collected := collectedSymbols(t)
 	targets := dispatchTargets(r)
 
+	mustCollect := func(what, symbol string) {
+		if _, ok := collected[symbol]; !ok {
+			t.Errorf("%s %q is not collected by any shipped profile, so it can never fire", what, symbol)
+		}
+	}
 	check := func(kind string, entries map[string]Entry) {
-		for symbol := range entries {
-			if _, isTarget := targets[symbol]; isTarget {
+		for symbol, entry := range entries {
+			if _, isTarget := targets[symbol]; !isTarget {
+				mustCollect(kind+" entry", symbol)
+			}
+			td := entry.TypeDispatch
+			if td == nil {
 				continue
 			}
-			if _, ok := collected[symbol]; !ok {
-				t.Errorf("%s entry %q is not collected by any shipped profile, so it can never fire", kind, symbol)
+			mustCollect(symbol+" dispatch column", td.TypeSymbol)
+			// A dispatch with no exponent source may only target metrics whose
+			// unit does not depend on scaling, which none of ours are.
+			if td.ScaleSymbol == "" && td.PrecisionSymbol == "" {
+				t.Errorf("%s dispatches without a scale or precision symbol; its magnitude cannot be derived", symbol)
+			}
+			for _, sibling := range []string{td.ScaleSymbol, td.PrecisionSymbol} {
+				if sibling != "" {
+					mustCollect(symbol+" exponent column", sibling)
+				}
 			}
 		}
 	}
 	check("metrics", r.entries)
 	check("system_metrics", r.systemEntries)
-}
-
-// TestDispatchScaleSymbolsAreCollected is the specific lesson from mapping Cisco's
-// entity sensors: dispatching a sensor to hw.temperature without its scale and
-// precision columns reports the wrong magnitude, which is worse than reporting it
-// under a generated name.
-//
-// So an entry may only declare scale and precision symbols that profiles collect,
-// and conversely a dispatch whose exponent cannot be read must not target a metric
-// with a fixed unit.
-func TestDispatchScaleSymbolsAreCollected(t *testing.T) {
-	r := newRegistry(t, DefaultOptions())
-	collected := collectedSymbols(t)
-
-	var checked int
-	for symbol, entry := range r.entries {
-		td := entry.TypeDispatch
-		if td == nil {
-			continue
-		}
-		checked++
-
-		if _, ok := collected[td.TypeSymbol]; !ok {
-			t.Errorf("%s dispatches on %q, which no profile collects", symbol, td.TypeSymbol)
-		}
-		for _, companion := range []struct{ role, name string }{
-			{"scale_symbol", td.ScaleSymbol},
-			{"precision_symbol", td.PrecisionSymbol},
-		} {
-			if companion.name == "" {
-				continue
-			}
-			if _, ok := collected[companion.name]; !ok {
-				t.Errorf("%s declares %s %q, which no profile collects: the exponent could not be applied and values would be reported at the wrong magnitude",
-					symbol, companion.role, companion.name)
-			}
-		}
-
-		// A dispatch with no exponent source may only target metrics whose unit
-		// does not depend on scaling.
-		if td.ScaleSymbol == "" && td.PrecisionSymbol == "" {
-			t.Errorf("%s dispatches without a scale or precision symbol; its magnitude cannot be derived", symbol)
-		}
-	}
-	if checked == 0 {
-		t.Skip("no type_dispatch entries in the registry")
-	}
 }

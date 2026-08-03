@@ -62,10 +62,10 @@ receivers:
       # Datadog agent, then drop to semconv once dashboards are ported.
       scheme: semconv
       fallback_namespace: snmp
-      # Emits device cpu/memory as system.* instead of the fallback namespace.
-      # Off by default: the system.* conventions describe in-system collection,
-      # and SNMP polling is external. See the README.
-      system_namespace_for_device_os: false
+      # Device cpu/memory as system.cpu.utilization and system.memory.*, which is
+      # the default. hw.* defines no metric for either. Set false to send them to
+      # the fallback namespace instead. See the README.
+      system_namespace_for_device_os: true
 
     fetch:
       oid_batch_size: 10

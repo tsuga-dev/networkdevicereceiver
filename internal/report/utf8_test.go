@@ -5,6 +5,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.opentelemetry.io/collector/pdata/pcommon"
+
 	"github.com/tsuga-dev/networkdevicereceiver/internal/naming"
 	"github.com/tsuga-dev/networkdevicereceiver/internal/profile"
 	"github.com/tsuga-dev/networkdevicereceiver/internal/profiledefinition"
@@ -74,13 +76,16 @@ metrics:
 		t.Logf("build reported: %v", err)
 	}
 
+	assertUTF8 := func(where, k string, v pcommon.Value) {
+		if !utf8.ValidString(v.AsString()) {
+			t.Errorf("%s attribute %q holds invalid UTF-8: %q", where, k, v.AsString())
+		}
+	}
 	var checked int
 	for i := 0; i < md.ResourceMetrics().Len(); i++ {
 		rm := md.ResourceMetrics().At(i)
 		for k, v := range rm.Resource().Attributes().All() {
-			if !utf8.ValidString(v.AsString()) {
-				t.Errorf("resource attribute %q holds invalid UTF-8: %q", k, v.AsString())
-			}
+			assertUTF8("resource", k, v)
 		}
 		sms := rm.ScopeMetrics()
 		for j := 0; j < sms.Len(); j++ {
@@ -90,10 +95,7 @@ metrics:
 				for p := 0; p < points.Len(); p++ {
 					for k, v := range points.At(p).Attributes().All() {
 						checked++
-						if !utf8.ValidString(v.AsString()) {
-							t.Errorf("metric %s attribute %q holds invalid UTF-8: %q (bytes %x)",
-								ms.At(m).Name(), k, v.AsString(), v.AsString())
-						}
+						assertUTF8("metric "+ms.At(m).Name(), k, v)
 					}
 				}
 			}
@@ -102,5 +104,4 @@ metrics:
 	if checked == 0 {
 		t.Fatal("no datapoint attributes were produced, so nothing was checked")
 	}
-	t.Logf("checked %d datapoint attributes", checked)
 }

@@ -107,6 +107,14 @@ type Entry struct {
 	StateSet     *StateSet     `yaml:"state_set"`
 	TypeDispatch *TypeDispatch `yaml:"type_dispatch"`
 
+	// ComponentIdentity attaches the per-component attributes (hw.id, hw.name and
+	// network.interface.name) to a metric outside the hw.* namespace.
+	//
+	// Needed where a component metric has no hw.* home: interface discards are
+	// system.network.packet.dropped, and without these attributes they could not
+	// be joined to the hw.network.* metrics for the same interface.
+	ComponentIdentity bool `yaml:"component_identity"`
+
 	// Priority breaks ties when two symbols map to the same metric and the same
 	// attributes, which happens whenever a profile collects both a 32-bit and a
 	// 64-bit form of one counter, or both ifSpeed and ifHighSpeed. The higher
@@ -139,17 +147,18 @@ type Options struct {
 	// rather than the domain, which is against semconv guidance but honestly
 	// signals "raw MIB-derived, not yet modelled".
 	FallbackNamespace string
-	// SystemNamespaceForDeviceOS opts cpu/memory metrics into system.*. Off by
-	// default because the system.* conventions say that namespace is for
-	// in-system collection, and SNMP polling is external.
+	// SystemNamespaceForDeviceOS puts device cpu and memory metrics under
+	// system.*, on by default. Set false to send them to the generated fallback
+	// namespace. See the README's naming tiers for why system.* is the right home.
 	SystemNamespaceForDeviceOS bool
 }
 
 // DefaultOptions returns the shipped defaults.
 func DefaultOptions() Options {
 	return Options{
-		Scheme:            SchemeSemconv,
-		FallbackNamespace: "snmp",
+		Scheme:                     SchemeSemconv,
+		FallbackNamespace:          "snmp",
+		SystemNamespaceForDeviceOS: true,
 	}
 }
 
@@ -275,16 +284,23 @@ func (r *Registry) Resolve(mib string, symbol profiledefinition.SymbolConfig) Re
 		}
 	}
 
+	return r.applyScheme(entry, symbol.Name, curated)
+}
+
+// applyScheme renders an entry under the configured naming scheme.
+func (r *Registry) applyScheme(entry Entry, symbolName string, curated bool) Resolution {
 	switch r.opts.Scheme {
 	case SchemeDatadogCompat:
+		// Every symbol lands on one metric named after itself, keeping the
+		// curated entry's unit and attributes.
 		compat := entry
-		compat.Metric = r.compatName(symbol.Name)
+		compat.Metric = r.compatName(symbolName)
 		compat.Tier = TierFallback
 		return Resolution{Names: []string{compat.Metric}, Entry: compat, Generated: true}
 
 	case SchemeBoth:
 		names := []string{entry.Metric}
-		if compat := r.compatName(symbol.Name); compat != entry.Metric {
+		if compat := r.compatName(symbolName); compat != entry.Metric {
 			names = append(names, compat)
 		}
 		return Resolution{Names: names, Entry: entry, Generated: !curated}
@@ -307,45 +323,18 @@ func (r *Registry) lookup(symbolName string) (Entry, bool) {
 	return Entry{}, false
 }
 
-// EntryByName returns a curated entry by its registry key, used to follow a
-// type_dispatch case to its target entry.
-func (r *Registry) EntryByName(name string) (Entry, bool) {
-	entry, ok := r.entries[name]
-	return entry, ok
-}
-
 // ResolveDispatched returns the resolution for a type_dispatch target.
 //
 // This exists because the metric names depend on the target entry, which is only
-// known once a row's type column has been read. Recomputing them here keeps the
-// scheme handling in one place: resolving the target directly and reusing the
-// original Resolution would emit the dispatching symbol's name -- which for a
-// dispatch-only entry is empty.
+// known once a row's type column has been read: resolving the target directly and
+// reusing the original Resolution would emit the dispatching symbol's name --
+// which for a dispatch-only entry is empty.
 func (r *Registry) ResolveDispatched(symbolName, target string) (Resolution, bool) {
 	entry, ok := r.entries[target]
 	if !ok {
 		return Resolution{}, false
 	}
-
-	switch r.opts.Scheme {
-	case SchemeDatadogCompat:
-		// Datadog does not dispatch; every sensor kind lands on one metric named
-		// after the symbol. Keep the target's unit and attributes.
-		compat := entry
-		compat.Metric = r.compatName(symbolName)
-		compat.Tier = TierFallback
-		return Resolution{Names: []string{compat.Metric}, Entry: compat}, true
-
-	case SchemeBoth:
-		names := []string{entry.Metric}
-		if compat := r.compatName(symbolName); compat != entry.Metric {
-			names = append(names, compat)
-		}
-		return Resolution{Names: names, Entry: entry}, true
-
-	default:
-		return Resolution{Names: []string{entry.Metric}, Entry: entry}, true
-	}
+	return r.applyScheme(entry, symbolName, true), true
 }
 
 // compatName is the Datadog metric name for a symbol.

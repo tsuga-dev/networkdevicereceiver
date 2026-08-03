@@ -451,9 +451,6 @@ func sensorExponent(store *snmp.ValueStore, td *naming.TypeDispatch,
 			}
 		}
 	}
-	if exponent == 0 {
-		return 1
-	}
 	return math.Pow(10, float64(exponent))
 }
 
@@ -520,15 +517,22 @@ func buildAttributes(entry naming.Entry, tags map[string]string,
 	}
 
 	// hw.id is required on hw.* metrics and must be unique within the device.
-	// Other namespaces must not carry it, so the attribute keeps its meaning.
-	if !strings.HasPrefix(metricName, "hw.") {
+	// Other namespaces do not carry it unless the entry opts in, so the attribute
+	// keeps its meaning.
+	if !strings.HasPrefix(metricName, "hw.") && !entry.ComponentIdentity {
 		return out
 	}
 	if id := componentID(component, index, symbolName); id != "" {
 		out["hw.id"] = id
 	}
-	if name := preferredName(tags); name != "" {
+	name := preferredName(tags)
+	if name != "" {
 		out["hw.name"] = name
+	}
+	// A component metric outside hw.* also carries the interface name the system
+	// conventions expect, so it is identifiable on its own terms.
+	if name != "" && !strings.HasPrefix(metricName, "hw.") {
+		out["network.interface.name"] = name
 	}
 	return out
 }
