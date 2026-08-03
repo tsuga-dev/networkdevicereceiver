@@ -26,9 +26,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Scoped to tracked files: the distribution job generates Go sources under
+      # _build/, and generated code is not ours to format.
       - name: gofmt
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(git ls-files '*.go' | xargs gofmt -l)
           if [ -n "$unformatted" ]; then
             echo "::error::these files need gofmt:"
             echo "$unformatted"
