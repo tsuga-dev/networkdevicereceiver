@@ -12,3 +12,6 @@ go.work.sum
 .DS_Store
 .idea/
 .vscode/
+
+# Collector builder output
+/_build/
