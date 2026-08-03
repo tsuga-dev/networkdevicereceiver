@@ -1,0 +1,329 @@
+# Symbol -> OpenTelemetry metric mapping.
+#
+# Verified against open-telemetry/semantic-conventions. The hw.* group is
+# Development status and network.io.direction is Release Candidate, so entries
+# here will need review when those advance; conformance_test.go pins instrument
+# and unit so a drift is a test failure rather than silent breakage.
+#
+# Scope: IF-MIB is curated in full because _generic-if reaches 136 of the 240
+# shipped profiles, plus ENTITY-SENSOR-MIB and the common UPS symbols. The
+# remaining ~2,300 vendor symbols resolve to generated snmp.* names until
+# curated -- that is WS4/D2 and is deliberately incomplete here.
+
+metrics:
+  # ---------------------------------------------------------------- interfaces
+  # Traffic. The 64-bit and 32-bit counters map to the same metric and the same
+  # attributes, so priority decides: a device answering both yields one stream
+  # per direction, taken from the 64-bit counter.
+  ifHCInOctets:
+    metric: hw.network.io
+    instrument: sum
+    unit: By
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+    priority: 10
+  ifHCOutOctets:
+    metric: hw.network.io
+    instrument: sum
+    unit: By
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+    priority: 10
+  ifInOctets:
+    metric: hw.network.io
+    instrument: sum
+    unit: By
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+    priority: 1
+  ifOutOctets:
+    metric: hw.network.io
+    instrument: sum
+    unit: By
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+    priority: 1
+
+  # Packets. The unicast/multicast/broadcast split has no semconv attribute yet;
+  # network.packet.class is our own and is a candidate for upstream proposal.
+  ifHCInUcastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+      network.packet.class: unicast
+    priority: 10
+  ifHCOutUcastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+      network.packet.class: unicast
+    priority: 10
+  ifHCInMulticastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+      network.packet.class: multicast
+    priority: 10
+  ifHCOutMulticastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+      network.packet.class: multicast
+    priority: 10
+  ifHCInBroadcastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+      network.packet.class: broadcast
+    priority: 10
+  ifHCOutBroadcastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+      network.packet.class: broadcast
+    priority: 10
+  ifInUcastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+      network.packet.class: unicast
+    priority: 1
+  ifOutUcastPkts:
+    metric: hw.network.packets
+    instrument: sum
+    unit: "{packet}"
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+      network.packet.class: unicast
+    priority: 1
+
+  # Errors and discards. Discards are not strictly errors; they are folded into
+  # hw.errors with an error.type discriminator, flagged in the design for review.
+  ifInErrors:
+    metric: hw.errors
+    instrument: sum
+    unit: "{error}"
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+      error.type: error
+  ifOutErrors:
+    metric: hw.errors
+    instrument: sum
+    unit: "{error}"
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+      error.type: error
+  ifInDiscards:
+    metric: hw.errors
+    instrument: sum
+    unit: "{error}"
+    attributes:
+      hw.type: network
+      network.io.direction: receive
+      error.type: discard
+  ifOutDiscards:
+    metric: hw.errors
+    instrument: sum
+    unit: "{error}"
+    attributes:
+      hw.type: network
+      network.io.direction: transmit
+      error.type: discard
+
+  # Link state. ifOperStatus up(1) is the only healthy value.
+  ifOperStatus:
+    metric: hw.network.up
+    instrument: updowncounter
+    unit: "1"
+    attributes:
+      hw.type: network
+    value_map:
+      "1": 1
+      default: 0
+
+  # Administrative state as a state set: one datapoint per state, per the
+  # OpenMetrics StateSet pattern hw.status follows.
+  ifAdminStatus:
+    metric: hw.status
+    instrument: updowncounter
+    unit: "1"
+    attributes:
+      hw.type: network
+    state_set:
+      attribute: hw.state
+      states: [ok, degraded, failed]
+      map:
+        "1": ok       # up
+        "2": failed   # down
+        "3": degraded # testing
+
+  # Bandwidth. Profiles call these gauges; semconv fixes an UpDownCounter, and
+  # the registry wins on instrument type.
+  ifHighSpeed:
+    metric: hw.network.bandwidth.limit
+    instrument: updowncounter
+    unit: By/s
+    attributes:
+      hw.type: network
+    scale: 125000        # Mbit/s -> By/s
+    priority: 10
+  ifSpeed:
+    metric: hw.network.bandwidth.limit
+    instrument: updowncounter
+    unit: By/s
+    attributes:
+      hw.type: network
+    scale: 0.125         # bit/s -> By/s
+    priority: 1
+
+  # ------------------------------------------------------------------- sensors
+  # One column whose meaning depends on a sibling column, so it dispatches.
+  entPhySensorValue:
+    type_dispatch:
+      type_symbol: entPhySensorType
+      cases:
+        "3": sensor.voltage      # voltsAC
+        "4": sensor.voltage      # voltsDC
+        "6": sensor.power        # watts
+        "8": sensor.temperature  # celsius
+        "10": sensor.fan_speed   # rpm
+
+  # Dispatch targets. Not symbols themselves, referenced by entPhySensorValue.
+  sensor.temperature:
+    metric: hw.temperature
+    instrument: gauge
+    unit: Cel
+    attributes:
+      hw.type: temperature
+  sensor.voltage:
+    metric: hw.voltage
+    instrument: gauge
+    unit: V
+    attributes:
+      hw.type: voltage
+  sensor.power:
+    metric: hw.power
+    instrument: gauge
+    unit: W
+  sensor.fan_speed:
+    metric: hw.fan.speed
+    instrument: gauge
+    unit: rpm
+    attributes:
+      hw.type: fan
+
+  # ----------------------------------------------------------------------- UPS
+  upsEstimatedMinutesRemaining:
+    metric: hw.battery.time_left
+    instrument: gauge
+    unit: s
+    attributes:
+      hw.type: battery
+    scale: 60            # minutes -> seconds
+  upsBatteryVoltage:
+    metric: hw.voltage
+    instrument: gauge
+    unit: V
+    attributes:
+      hw.type: voltage
+  upsBatteryTemperature:
+    metric: hw.temperature
+    instrument: gauge
+    unit: Cel
+    attributes:
+      hw.type: temperature
+  upsAdvBatteryCapacity:
+    metric: hw.battery.charge
+    instrument: gauge
+    unit: "1"
+    attributes:
+      hw.type: battery
+    scale: 0.01          # percent -> fraction
+  upsHighPrecInputLineVoltage:
+    metric: hw.voltage
+    instrument: gauge
+    unit: V
+    attributes:
+      hw.type: voltage
+    scale: 0.1
+
+  upsBasicOutputStatus:
+    metric: hw.status
+    instrument: updowncounter
+    unit: "1"
+    attributes:
+      hw.type: power_supply
+    state_set:
+      attribute: hw.state
+      states: [ok, degraded, failed]
+      map:
+        "2": ok        # onLine
+        "3": degraded  # onBattery
+        "4": degraded  # onSmartBoost
+        "5": failed    # timedSleeping
+        "6": failed    # softwareBypass
+        "7": failed    # off
+        "8": failed    # rebooting
+
+# Tier 2: device-OS metrics, emitted only when
+# naming.system_namespace_for_device_os is enabled.
+#
+# cpu.usage and memory.* are the two most-referenced families in the whole
+# profile library (61 and 36+25+24+17 profiles) and hw.* has no home for either.
+# Default is the generated snmp.* name; this section is the opt-in, and the real
+# fix is an upstream proposal for hw.cpu.utilization / hw.memory.usage.
+system_metrics:
+  cpu.usage:
+    metric: system.cpu.utilization
+    instrument: gauge
+    unit: "1"
+    scale: 0.01          # percent -> fraction
+  memory.usage:
+    metric: system.memory.utilization
+    instrument: gauge
+    unit: "1"
+    scale: 0.01
+  memory.used:
+    metric: system.memory.usage
+    instrument: updowncounter
+    unit: By
+    attributes:
+      system.memory.state: used
+  memory.free:
+    metric: system.memory.usage
+    instrument: updowncounter
+    unit: By
+    attributes:
+      system.memory.state: free
+  memory.total:
+    metric: system.memory.limit
+    instrument: updowncounter
+    unit: By
