@@ -1,0 +1,14 @@
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+
+# Go workspace files are developer-local
+go.work
+go.work.sum
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/

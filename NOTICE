@@ -1,0 +1,42 @@
+Network Device Receiver
+Copyright 2026 Tsuga
+
+This product includes software developed at Tsuga.
+
+--------------------------------------------------------------------------------
+
+This product contains code and data derived from Datadog software, used under
+the Apache License, Version 2.0.
+
+1. SNMP device profiles
+
+   internal/profile/default_profiles/*.yaml
+
+   Copied unmodified from DataDog/integrations-core, path
+   snmp/datadog_checks/snmp/data/default_profiles/. The upstream commit is
+   recorded in internal/profile/default_profiles/UPSTREAM-SHA.
+
+   Source: https://github.com/DataDog/integrations-core
+   License: Apache License, Version 2.0
+
+2. Profile schema, fetch strategy and value store
+
+   internal/profiledefinition/
+   internal/profile/
+   internal/snmp/
+
+   Ported from DataDog/datadog-agent, principally:
+     pkg/networkdevice/profile/profiledefinition/   (profile schema)
+     pkg/collector/corechecks/snmp/internal/fetch/  (fetch and batch sizing)
+     pkg/collector/corechecks/snmp/internal/profile/ (load, resolve, match)
+     comp/core/autodiscovery/listeners/snmp.go      (subnet autodiscovery)
+
+   Source: https://github.com/DataDog/datadog-agent
+   License: Apache License, Version 2.0
+
+--------------------------------------------------------------------------------
+
+This product depends on software from the OpenTelemetry Authors
+(https://github.com/open-telemetry), licensed under the Apache License,
+Version 2.0, and on gosnmp (https://github.com/gosnmp/gosnmp), licensed under
+the BSD 2-Clause License.
