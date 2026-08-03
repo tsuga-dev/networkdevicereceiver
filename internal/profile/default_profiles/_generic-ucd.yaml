@@ -1,0 +1,3 @@
+extends:
+  - _generic-ucd-cpu-mem.yaml
+  - _generic-ucd-base.yaml
