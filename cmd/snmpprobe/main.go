@@ -197,18 +197,17 @@ func pollDevice(opts options, credentials snmp.Credentials, profiles *profile.St
 	}
 	defer func() { _ = session.Close() }()
 
-	// Identify the device unless a profile was pinned.
+	// Identify the device. sysName is read purely so the operator can confirm
+	// they are looking at the box they meant.
 	sysObjectID, sysName := device.SysObjectID, ""
-	if sysObjectID == "" || sysName == "" {
-		store, _, _ := snmp.Fetch(session,
-			[]string{discovery.OIDSysObjectID, discovery.OIDSysName}, nil, snmp.FetchConfig{})
-		if store != nil {
-			if v, err := store.Scalar(discovery.OIDSysObjectID); err == nil {
-				sysObjectID = v.String()
-			}
-			if v, err := store.Scalar(discovery.OIDSysName); err == nil {
-				sysName = v.String()
-			}
+	store, _, _ := snmp.Fetch(session,
+		[]string{discovery.OIDSysObjectID, discovery.OIDSysName}, nil, snmp.FetchConfig{})
+	if store != nil {
+		if v, err := store.Scalar(discovery.OIDSysObjectID); err == nil {
+			sysObjectID = v.String()
+		}
+		if v, err := store.Scalar(discovery.OIDSysName); err == nil {
+			sysName = v.String()
 		}
 	}
 
@@ -262,6 +261,8 @@ func pollDevice(opts options, credentials snmp.Credentials, profiles *profile.St
 
 		started := time.Now()
 		scalars, columns := compiled.FetchOIDs()
+		// fetchErr is only fatal when nothing came back: a partial poll is the
+		// normal case and still yields metrics.
 		values, fetchReport, fetchErr := snmp.Fetch(session, scalars, columns, snmp.FetchConfig{})
 		if values == nil {
 			return fmt.Errorf("fetch: %w", fetchErr)
@@ -286,7 +287,6 @@ func pollDevice(opts options, credentials snmp.Credentials, profiles *profile.St
 			// missing metrics.
 			fmt.Printf("    notes: %s\n", firstLines(buildErr.Error(), 3))
 		}
-		_ = fetchErr
 	}
 
 	fmt.Println()

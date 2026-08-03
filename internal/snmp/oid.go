@@ -40,9 +40,3 @@ func CompareOIDs(a, b string) int {
 
 // OIDLess adapts CompareOIDs for sort.Slice.
 func OIDLess(a, b string) bool { return CompareOIDs(a, b) < 0 }
-
-// WithinSubtree reports whether oid lies strictly below root.
-func WithinSubtree(root, oid string) bool {
-	_, ok := rowIndex(root, oid)
-	return ok
-}

@@ -47,9 +47,6 @@ type Scanner struct {
 	// the core count considerably.
 	Workers int
 	Dial    Dialer
-	// Dedupe drops devices that answer on more than one address with the same
-	// identity.
-	Dedupe bool
 }
 
 // probeResult is one address's outcome.
@@ -127,10 +124,6 @@ func (s *Scanner) Scan(ctx context.Context, subnet SubnetConfig) ([]Device, erro
 		// still useful and the next interval completes it.
 		return found, err
 	}
-
-	if s.Dedupe {
-		found = dedupe(found)
-	}
 	return found, nil
 }
 
@@ -152,15 +145,20 @@ func (s *Scanner) probe(ctx context.Context, address string, subnet SubnetConfig
 		if err != nil {
 			continue
 		}
+		if err := session.Connect(); err != nil {
+			_ = session.Close()
+			continue
+		}
 
-		sysObjectID, _, ok := probeIdentity(session)
+		sysObjectID, ok := ProbeSysObjectID(session)
 		_ = session.Close()
 		if !ok {
 			continue
 		}
 
-		// sysName is deliberately not stored: it is read again on every poll, so
-		// a device rename is picked up without waiting for a rediscovery.
+		// sysName is deliberately not read here: the profile's own metadata
+		// collects it on every poll, so a device rename is picked up without
+		// waiting for a rediscovery.
 		return Device{
 			ID:          DeviceID(address, subnet.Network),
 			Address:     address,
@@ -174,31 +172,21 @@ func (s *Scanner) probe(ctx context.Context, address string, subnet SubnetConfig
 	return Device{}, false
 }
 
-// probeIdentity reads the two OIDs that identify a device.
-func probeIdentity(session snmp.Session) (sysObjectID, sysName string, ok bool) {
-	if err := session.Connect(); err != nil {
-		return "", "", false
+// ProbeSysObjectID reads the OID that both proves a connected device speaks SNMP
+// and selects its profile. Without sysObjectID a device is not usable even if
+// something answered, so a failure here is reported as "not found".
+func ProbeSysObjectID(session snmp.Session) (sysObjectID string, ok bool) {
+	// A partial answer still proves the device is there and speaks SNMP, so the
+	// fetch error only matters when nothing came back at all.
+	store, _, err := snmp.Fetch(session, []string{OIDSysObjectID}, nil, snmp.FetchConfig{})
+	if err != nil && store == nil {
+		return "", false
 	}
-	store, _, err := snmp.Fetch(session, []string{OIDSysObjectID, OIDSysName}, nil, snmp.FetchConfig{})
-	if err != nil {
-		// A partial answer still proves the device is there and speaks SNMP.
-		if store == nil {
-			return "", "", false
-		}
-	}
-
 	value, err := store.Scalar(OIDSysObjectID)
 	if err != nil {
-		// Without sysObjectID no profile can be selected, so the device is not
-		// usable even if something answered.
-		return "", "", false
+		return "", false
 	}
-	sysObjectID = value.String()
-
-	if name, err := store.Scalar(OIDSysName); err == nil {
-		sysName = name.String()
-	}
-	return sysObjectID, sysName, sysObjectID != ""
+	return value.String(), value.String() != ""
 }
 
 // DeviceID builds a stable identifier. The subnet is included so the same
@@ -208,25 +196,6 @@ func DeviceID(address, subnet string) string {
 		return address
 	}
 	return address + "|" + subnet
-}
-
-// dedupe drops devices sharing an identity, keeping the lowest address.
-//
-// Identity here is the sysObjectID alone, which is a weak signal: many devices
-// of one model share it. Deduping on it would collapse a whole fleet, so this
-// only removes exact address duplicates and is a placeholder for the serial or
-// engine-ID based dedupe real multi-homed devices need.
-func dedupe(devices []Device) []Device {
-	seen := make(map[string]struct{}, len(devices))
-	out := make([]Device, 0, len(devices))
-	for _, dev := range devices {
-		if _, dup := seen[dev.ID]; dup {
-			continue
-		}
-		seen[dev.ID] = struct{}{}
-		out = append(out, dev)
-	}
-	return out
 }
 
 // ExpandCIDR lists the probeable addresses of a CIDR.

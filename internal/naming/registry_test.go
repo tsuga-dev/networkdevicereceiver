@@ -49,9 +49,6 @@ func TestResolveInterfaceTraffic(t *testing.T) {
 	if got := in.Entry.Attributes["hw.type"]; got != "network" {
 		t.Errorf("hw.type = %q, want network", got)
 	}
-	if in.Entry.Tier != TierHardware {
-		t.Errorf("tier = %d, want 1", in.Entry.Tier)
-	}
 
 	out := r.Resolve("IF-MIB", sym("ifHCOutOctets"))
 	if got := out.Entry.Attributes["network.io.direction"]; got != "transmit" {
@@ -191,9 +188,6 @@ func TestSystemTierIsOnByDefault(t *testing.T) {
 	}
 	if got := res.Names[0]; got != "system.cpu.utilization" {
 		t.Errorf("metric = %q, want system.cpu.utilization", got)
-	}
-	if res.Entry.Tier != TierSystem {
-		t.Errorf("tier = %d, want 2", res.Entry.Tier)
 	}
 	// SNMP reports a percentage; every semconv utilization is a fraction.
 	if res.Entry.Scale != 0.01 {
@@ -378,9 +372,6 @@ func TestUnmodelledSymbolStillEmits(t *testing.T) {
 	}
 	if !res.Generated {
 		t.Error("should be reported as generated")
-	}
-	if res.Entry.Tier != TierFallback {
-		t.Errorf("tier = %d, want 3", res.Entry.Tier)
 	}
 	if res.Entry.Scale != 1 {
 		t.Errorf("scale = %v, want 1", res.Entry.Scale)

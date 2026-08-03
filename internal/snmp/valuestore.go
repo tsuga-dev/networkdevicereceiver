@@ -83,22 +83,21 @@ func (v ResultValue) Bytes() ([]byte, bool) {
 	return b, ok
 }
 
-// ScalarValues maps a canonical OID to its value.
-type ScalarValues map[string]ResultValue
-
-// ColumnValues maps a column OID to that column's values keyed by row index.
-type ColumnValues map[string]map[string]ResultValue
-
 // ValueStore holds one poll's results, indexed by OID and decoupled from any
 // profile, so the reporting stage can be tested without a device.
 type ValueStore struct {
-	Scalars ScalarValues
-	Columns ColumnValues
+	// Scalars maps a canonical OID to its value.
+	Scalars map[string]ResultValue
+	// Columns maps a column OID to that column's values keyed by row index.
+	Columns map[string]map[string]ResultValue
 }
 
 // NewValueStore returns an empty store.
 func NewValueStore() *ValueStore {
-	return &ValueStore{Scalars: ScalarValues{}, Columns: ColumnValues{}}
+	return &ValueStore{
+		Scalars: map[string]ResultValue{},
+		Columns: map[string]map[string]ResultValue{},
+	}
 }
 
 // Count returns how many values were collected, across scalars and table rows.

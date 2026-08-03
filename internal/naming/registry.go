@@ -17,9 +17,8 @@ package naming
 import (
 	"embed"
 	"fmt"
-	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/tsuga-dev/networkdevicereceiver/internal/profiledefinition"
 )
@@ -37,18 +36,6 @@ const (
 	Sum Instrument = "sum"
 	// UpDownCounter is a cumulative non-monotonic sum.
 	UpDownCounter Instrument = "updowncounter"
-)
-
-// Tier records which namespace an entry belongs to.
-type Tier int
-
-const (
-	// TierHardware is the hw.* semantic conventions.
-	TierHardware Tier = 1
-	// TierSystem is the system.* namespace, used only when opted in.
-	TierSystem Tier = 2
-	// TierFallback is the generated snmp.* namespace.
-	TierFallback Tier = 3
 )
 
 // StateSet describes an OpenMetrics-style state set. hw.status must emit one
@@ -121,9 +108,6 @@ type Entry struct {
 	// priority wins; without this the receiver would emit two conflicting
 	// datapoints for one stream.
 	Priority int `yaml:"priority"`
-
-	// Tier is derived from Metric's namespace unless stated.
-	Tier Tier `yaml:"tier"`
 }
 
 // Scheme selects how metrics are named.
@@ -217,7 +201,6 @@ func New(opts Options) (*Registry, error) {
 		if err != nil {
 			return nil, err
 		}
-		normalized.Tier = TierSystem
 		r.systemEntries[symbol] = normalized
 	}
 	return r, nil
@@ -233,9 +216,6 @@ func normalizeEntry(symbol string, e Entry) (Entry, error) {
 	if e.Instrument == "" {
 		e.Instrument = Gauge
 	}
-	if e.Tier == 0 {
-		e.Tier = tierOf(e.Metric)
-	}
 	if e.StateSet != nil {
 		if e.StateSet.Attribute == "" {
 			e.StateSet.Attribute = "hw.state"
@@ -245,17 +225,6 @@ func normalizeEntry(symbol string, e Entry) (Entry, error) {
 		}
 	}
 	return e, nil
-}
-
-func tierOf(metric string) Tier {
-	switch {
-	case strings.HasPrefix(metric, "hw."):
-		return TierHardware
-	case strings.HasPrefix(metric, "system."):
-		return TierSystem
-	default:
-		return TierFallback
-	}
 }
 
 // Resolution is what to emit for one symbol.
@@ -280,7 +249,6 @@ func (r *Registry) Resolve(mib string, symbol profiledefinition.SymbolConfig) Re
 			Metric:     fallbackName,
 			Instrument: Gauge,
 			Scale:      1,
-			Tier:       TierFallback,
 		}
 	}
 
@@ -295,7 +263,6 @@ func (r *Registry) applyScheme(entry Entry, symbolName string, curated bool) Res
 		// curated entry's unit and attributes.
 		compat := entry
 		compat.Metric = r.compatName(symbolName)
-		compat.Tier = TierFallback
 		return Resolution{Names: []string{compat.Metric}, Entry: compat, Generated: true}
 
 	case SchemeBoth:

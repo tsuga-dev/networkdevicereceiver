@@ -37,8 +37,11 @@ func TestUnmarshalConfig(t *testing.T) {
 	if cfg.Discovery.RediscoveryInterval != 15*time.Minute {
 		t.Errorf("rediscovery_interval = %v", cfg.Discovery.RediscoveryInterval)
 	}
-	if !cfg.Discovery.Dedupe {
-		t.Error("dedupe not read")
+	if cfg.Discovery.Workers != 4 {
+		t.Errorf("discovery.workers = %d, want 4", cfg.Discovery.Workers)
+	}
+	if cfg.Discovery.AllowedFailures != 5 {
+		t.Errorf("discovery.allowed_failures = %d, want 5", cfg.Discovery.AllowedFailures)
 	}
 
 	if len(cfg.Subnets) != 2 {

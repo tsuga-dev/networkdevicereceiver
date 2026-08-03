@@ -18,7 +18,6 @@ import (
 type metricPool struct {
 	metrics pmetric.MetricSlice
 	byName  map[string]pmetric.Metric
-	kinds   map[string]naming.Instrument
 	// streams deduplicates datapoints that share a metric name and attribute
 	// set, keeping the highest-priority contributor.
 	streams map[string]stream
@@ -35,9 +34,19 @@ func newMetricPool(metrics pmetric.MetricSlice) *metricPool {
 	return &metricPool{
 		metrics: metrics,
 		byName:  map[string]pmetric.Metric{},
-		kinds:   map[string]naming.Instrument{},
 		streams: map[string]stream{},
 	}
+}
+
+// instrumentOf reports which instrument kind a metric was created as.
+func instrumentOf(m pmetric.Metric) naming.Instrument {
+	if m.Type() == pmetric.MetricTypeSum && !m.Sum().IsMonotonic() {
+		return naming.UpDownCounter
+	}
+	if m.Type() == pmetric.MetricTypeSum {
+		return naming.Sum
+	}
+	return naming.Gauge
 }
 
 // metric returns the metric for a name, creating it on first use.
@@ -45,9 +54,9 @@ func (p *metricPool) metric(name, unit string, instrument naming.Instrument) (pm
 	if existing, ok := p.byName[name]; ok {
 		// A name must keep one instrument kind. Two symbols disagreeing means a
 		// registry mistake, and silently mixing them would corrupt the series.
-		if p.kinds[name] != instrument {
+		if got := instrumentOf(existing); got != instrument {
 			return pmetric.Metric{}, fmt.Errorf(
-				"metric %s requested as %s but already emitted as %s", name, instrument, p.kinds[name])
+				"metric %s requested as %s but already emitted as %s", name, instrument, got)
 		}
 		return existing, nil
 	}
@@ -72,7 +81,6 @@ func (p *metricPool) metric(name, unit string, instrument naming.Instrument) (pm
 	}
 
 	p.byName[name] = m
-	p.kinds[name] = instrument
 	return m, nil
 }
 

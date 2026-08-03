@@ -44,9 +44,9 @@ type Config struct {
 	// Devices are polled without discovery.
 	Devices []DeviceConfig `mapstructure:"devices"`
 
-	Profiles ProfilesConfig `mapstructure:"profiles"`
-	Naming   NamingConfig   `mapstructure:"naming"`
-	Fetch    FetchConfig    `mapstructure:"fetch"`
+	Profiles ProfilesConfig   `mapstructure:"profiles"`
+	Naming   NamingConfig     `mapstructure:"naming"`
+	Fetch    snmp.FetchConfig `mapstructure:"fetch"`
 
 	// Storage names a storage extension used to persist the discovered device
 	// set. Without it, a restart rescans every subnet before monitoring resumes.
@@ -63,8 +63,6 @@ type DiscoveryConfig struct {
 	// AllowedFailures is how many consecutive failures a device tolerates before
 	// being forgotten.
 	AllowedFailures int `mapstructure:"allowed_failures"`
-	// Dedupe drops devices reachable at more than one address.
-	Dedupe bool `mapstructure:"dedupe"`
 }
 
 // SubnetConfig is one subnet to scan. A single credential set can be given
@@ -115,15 +113,6 @@ type NamingConfig struct {
 	SystemNamespaceForDeviceOS bool `mapstructure:"system_namespace_for_device_os"`
 }
 
-// FetchConfig tunes SNMP request shaping.
-type FetchConfig struct {
-	OIDBatchSize       int    `mapstructure:"oid_batch_size"`
-	BulkMaxRepetitions uint32 `mapstructure:"bulk_max_repetitions"`
-	// MaxRowsPerColumn bounds one table walk, guarding against a runaway table
-	// producing unbounded series.
-	MaxRowsPerColumn int `mapstructure:"max_rows_per_column"`
-}
-
 // Defaults chosen to be safe on a large fleet rather than fastest on one device.
 const (
 	defaultCollectionInterval  = 60 * time.Second
@@ -152,7 +141,7 @@ func createDefaultConfig() component.Config {
 			FallbackNamespace:          "snmp",
 			SystemNamespaceForDeviceOS: true,
 		},
-		Fetch: FetchConfig{
+		Fetch: snmp.FetchConfig{
 			OIDBatchSize:       snmp.DefaultOIDBatchSize,
 			BulkMaxRepetitions: snmp.DefaultBulkMaxRepetitions,
 			MaxRowsPerColumn:   snmp.DefaultMaxRowsPerColumn,
@@ -284,28 +273,13 @@ func parseEndpoint(endpoint string) (host string, port uint16, err error) {
 	return hostPart, uint16(parsedPort), nil
 }
 
-// namingOptions converts config to registry options.
+// namingOptions converts config to registry options. Empty fields are left
+// empty: naming.New applies the defaults, so they live in one place.
 func (c *Config) namingOptions() naming.Options {
-	opts := naming.Options{
+	return naming.Options{
 		Scheme:                     naming.Scheme(c.Naming.Scheme),
 		FallbackNamespace:          c.Naming.FallbackNamespace,
 		SystemNamespaceForDeviceOS: c.Naming.SystemNamespaceForDeviceOS,
-	}
-	if opts.Scheme == "" {
-		opts.Scheme = naming.SchemeSemconv
-	}
-	if opts.FallbackNamespace == "" {
-		opts.FallbackNamespace = "snmp"
-	}
-	return opts
-}
-
-// fetchConfig converts config to engine options.
-func (c *Config) fetchConfig() snmp.FetchConfig {
-	return snmp.FetchConfig{
-		OIDBatchSize:       c.Fetch.OIDBatchSize,
-		BulkMaxRepetitions: c.Fetch.BulkMaxRepetitions,
-		MaxRowsPerColumn:   c.Fetch.MaxRowsPerColumn,
 	}
 }
 
