@@ -1,0 +1,97 @@
+# Monitors every SNMP device in two subnets plus one pinned device.
+#
+# This is the whole configuration for a fleet of thousands: the device profiles
+# supply the OIDs, and sysObjectID selects the profile per device.
+
+receivers:
+  networkdevice:
+    collection_interval: 60s
+    timeout: 5s
+    retries: 3
+
+    # Bounds how many devices are polled at once. Polls are spread across the
+    # collection interval, so this is a concurrency limit rather than a burst.
+    pollers: 50
+
+    discovery:
+      rediscovery_interval: 1h
+      workers: 10
+      # A device is forgotten only after this many consecutive failures, so a
+      # brief outage does not drop it from monitoring.
+      allowed_failures: 3
+
+    subnets:
+      # v2c with a single community, given inline.
+      - network: 10.10.0.0/24
+        version: v2c
+        community: ${env:SNMP_COMMUNITY}
+
+      # v3, with several credential sets tried in order per device. The set that
+      # answers is remembered, so later polls do not retry the others.
+      - network: 10.20.0.0/22
+        version: v3
+        ignored_addresses:
+          - 10.20.0.1
+        authentications:
+          - version: v3
+            user: monitor
+            auth_protocol: SHA256
+            auth_key: ${env:SNMP_AUTH_KEY}
+            priv_protocol: AES
+            priv_key: ${env:SNMP_PRIV_KEY}
+          - version: v3
+            user: legacy-monitor
+            auth_protocol: SHA
+            auth_key: ${env:SNMP_LEGACY_AUTH_KEY}
+
+    # Devices polled without discovery. A pinned profile skips sysObjectID
+    # detection, which is useful for a device that misreports it.
+    devices:
+      - endpoint: udp://10.9.9.1:161
+        version: v2c
+        community: ${env:SNMP_COMMUNITY}
+        profile: cisco-nexus
+
+    profiles:
+      # Profiles here shadow the embedded ones by name. A Datadog
+      # snmp.d/profiles directory can be pointed at unchanged.
+      user_dir: /etc/otelcol/snmp.d/profiles
+
+    naming:
+      # semconv | datadog_compat | both. Use "both" during a migration from a
+      # Datadog agent, then drop to semconv once dashboards are ported.
+      scheme: semconv
+      fallback_namespace: snmp
+      # Emits device cpu/memory as system.* instead of the fallback namespace.
+      # Off by default: the system.* conventions describe in-system collection,
+      # and SNMP polling is external. See the README.
+      system_namespace_for_device_os: false
+
+    fetch:
+      oid_batch_size: 10
+      bulk_max_repetitions: 10
+      # Guards against a device with a runaway table producing unbounded series.
+      max_rows_per_column: 10000
+
+    # Persists the discovered device set, so a restart resumes monitoring
+    # instead of rescanning every subnet first.
+    storage: file_storage
+
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol
+
+processors:
+  batch:
+
+exporters:
+  otlp:
+    endpoint: otlp.example.com:4317
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    metrics:
+      receivers: [networkdevice]
+      processors: [batch]
+      exporters: [otlp]
