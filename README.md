@@ -179,10 +179,13 @@ magnitude) and `entPhySensorPrecision` (decimal places already folded into the
 integer). Both are applied, so a reading of 425 with precision 1 is 42.5 °C and
 334 with precision 2 is 3.34 V — correct per device, with no divisor to configure.
 
-Cisco's older CISCO-ENTITY-SENSOR-MIB is dispatched the same way, but **without**
-the exponent: `entSensorScale` and `entSensorPrecision` exist in that MIB and no
-shipped profile collects them, so a Cisco device reporting deci-celsius reads ten
-times high until those two columns are added to a profile.
+Cisco's older CISCO-ENTITY-SENSOR-MIB is deliberately **not** mapped. Its
+`entSensorValue` and `entSensorType` columns are collected by profiles, but
+`entSensorScale` and `entSensorPrecision` are not, so the magnitude cannot be
+derived and a device reporting deci-celsius would read ten times high. A wrong
+number under a conventional metric name is trusted; the generated `snmp.*` name is
+not, which makes it the safer place for the value until a profile collects those
+two columns.
 
 ### Rates
 
@@ -233,7 +236,11 @@ false spike.
   still worthwhile; if accepted, this becomes a rename behind a feature gate.
 - `network.io.cast` and the `firewall.*`, `wireless.*` namespaces are ours: no
   convention models them. They are candidates for upstream proposals.
-- Cisco entity sensors get no exponent, as described under Sensor scaling.
+- Cisco entity sensors and CISCO-ENVMON-MIB states resolve to generated names
+  rather than `hw.*`, as described under Sensor scaling.
+- The registry maps only symbols the shipped profiles actually collect, enforced by
+  a test. A user profile collecting something else -- the 32-bit `ifInOctets`, say
+  -- lands in the fallback tier until an entry is added.
 - Device dedupe currently removes only exact address duplicates; multi-homed
   devices need serial or engine-ID based identity.
 - SNMP traps and LLDP topology are out of scope.
