@@ -215,6 +215,10 @@ metrics:
         "6": sensor.power        # watts
         "8": sensor.temperature  # celsius
         "10": sensor.fan_speed   # rpm
+      # EntitySensorDataScale and EntitySensorPrecision: the device states its own
+      # exponent, so no per-device divisor has to be guessed.
+      scale_symbol: entPhySensorScale
+      precision_symbol: entPhySensorPrecision
 
   # Dispatch targets. Not symbols themselves, referenced by entPhySensorValue.
   sensor.temperature:
@@ -275,7 +279,55 @@ metrics:
       hw.type: voltage
     scale: 0.1
 
-  upsBasicOutputStatus:
+  upsEstimatedChargeRemaining:
+    metric: hw.battery.charge
+    instrument: gauge
+    unit: "1"
+    attributes:
+      hw.type: battery
+    scale: 0.01          # percent -> fraction
+  upsOutputFrequency:
+    metric: hw.frequency
+    instrument: gauge
+    unit: Hz
+    scale: 0.1           # UPS-MIB reports tenths of a hertz
+
+  # ------------------------------------------------------- Cisco entity sensors
+  # CISCO-ENTITY-SENSOR-MIB predates the standard one and many Cisco devices only
+  # populate this table. Same data types, so it dispatches to the same targets.
+  #
+  # entSensorScale and entSensorPrecision exist in the MIB but no shipped profile
+  # collects them, so no exponent can be applied here: a device reporting
+  # deci-celsius will read ten times high until those columns are added to a
+  # profile. See the README.
+  entSensorValue:
+    type_dispatch:
+      type_symbol: entSensorType
+      cases:
+        "3": sensor.voltage      # voltsAC
+        "4": sensor.voltage      # voltsDC
+        "6": sensor.power        # watts
+        "8": sensor.temperature  # celsius
+        "10": sensor.fan_speed   # rpm
+
+  # CISCO-ENVMON-MIB component health. Values 1 normal, 2 warning, 3 critical,
+  # 4 shutdown, 5 notPresent, 6 notFunctioning.
+  ciscoEnvMonFanState:
+    metric: hw.status
+    instrument: updowncounter
+    unit: "1"
+    attributes:
+      hw.type: fan
+    state_set:
+      attribute: hw.state
+      states: [ok, degraded, failed]
+      map:
+        "1": ok
+        "2": degraded
+        "3": failed
+        "4": failed
+        "6": failed
+  ciscoEnvMonSupplyState:
     metric: hw.status
     instrument: updowncounter
     unit: "1"
@@ -285,13 +337,101 @@ metrics:
       attribute: hw.state
       states: [ok, degraded, failed]
       map:
-        "2": ok        # onLine
-        "3": degraded  # onBattery
-        "4": degraded  # onSmartBoost
-        "5": failed    # timedSleeping
-        "6": failed    # softwareBypass
-        "7": failed    # off
-        "8": failed    # rebooting
+        "1": ok
+        "2": degraded
+        "3": failed
+        "4": failed
+        "6": failed
+  ciscoEnvMonTemperatureState:
+    metric: hw.status
+    instrument: updowncounter
+    unit: "1"
+    attributes:
+      hw.type: temperature
+    state_set:
+      attribute: hw.state
+      states: [ok, degraded, failed]
+      map:
+        "1": ok
+        "2": degraded
+        "3": failed
+        "4": failed
+        "6": failed
+
+  # ------------------------------------------------------------------- firewall
+  # No semantic convention covers firewall session or tunnel capacity, so these
+  # names are ours. They match the demo NDM collector's, which is where they were
+  # first used.
+  panSessionActiveTcp:
+    metric: firewall.sessions.usage
+    instrument: gauge
+    unit: "{session}"
+    attributes:
+      network.transport: tcp
+  panSessionActiveUdp:
+    metric: firewall.sessions.usage
+    instrument: gauge
+    unit: "{session}"
+    attributes:
+      network.transport: udp
+  panSessionActiveICMP:
+    metric: firewall.sessions.usage
+    instrument: gauge
+    unit: "{session}"
+    attributes:
+      network.transport: icmp
+  panSessionMax:
+    metric: firewall.sessions.limit
+    instrument: updowncounter
+    unit: "{session}"
+  panSessionUtilization:
+    metric: firewall.sessions.utilization
+    instrument: gauge
+    unit: "1"
+    scale: 0.01          # percent -> fraction, as semconv does for utilization
+  panGPGWUtilizationActiveTunnels:
+    metric: firewall.vpn.tunnels.usage
+    instrument: gauge
+    unit: "{tunnel}"
+  panGPGWUtilizationMaxTunnels:
+    metric: firewall.vpn.tunnels.limit
+    instrument: updowncounter
+    unit: "{tunnel}"
+  panGPGWUtilizationPct:
+    metric: firewall.vpn.tunnels.utilization
+    instrument: gauge
+    unit: "1"
+    scale: 0.01
+
+  # ------------------------------------------------------------------- wireless
+  # Also unmodelled by semconv; names match the demo collector's.
+  wlsxSwitchTotalNumAccessPoints:
+    metric: wireless.access_point.count
+    instrument: updowncounter
+    unit: "{access_point}"
+  wlsxSwitchTotalNumStationsAssociated:
+    metric: wireless.client.count
+    instrument: updowncounter
+    unit: "{client}"
+
+  # --------------------------------------------------------------- host and L4
+  # tcpCurrEstab is the count of established connections. semconv spells this
+  # system.network.connection.count with a network.transport attribute.
+  tcpCurrEstab:
+    metric: system.network.connection.count
+    instrument: updowncounter
+    unit: "{connection}"
+    attributes:
+      network.transport: tcp
+      network.connection.state: established
+    tier: 2
+  # HOST-RESOURCES-MIB uptime is TimeTicks, hundredths of a second.
+  hrSystemUptime:
+    metric: system.uptime
+    instrument: gauge
+    unit: s
+    scale: 0.01
+    tier: 2
 
 # Tier 2: device-OS metrics, emitted only when
 # naming.system_namespace_for_device_os is enabled.
