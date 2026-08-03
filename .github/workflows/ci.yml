@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push supersedes an in-flight run for the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Single source of truth for the Go version.
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      # -shuffle catches tests that depend on execution order; -race matters
+      # because the receiver runs a discovery loop, a scheduler and a poller pool
+      # concurrently.
+      - name: test
+        run: go test -race -shuffle=on -coverprofile=coverage.out ./...
+
+      # Reported, not gated. The total is dragged down by the two cmd/ packages,
+      # which have no tests; per-package figures are 66-91%. Add a threshold once
+      # internal/report is brought up and the commands are covered.
+      - name: coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Coverage'
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  profiles:
+    name: validate device profiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Every embedded profile must parse, resolve and compile. This is the
+      # check that catches an upstream schema change: a new field or a renamed
+      # construct fails here rather than silently dropping metrics at runtime.
+      - name: lint the embedded profile library
+        run: go run ./cmd/snmpprofilecheck -quiet
+
+      - name: report semantic-convention coverage
+        run: |
+          {
+            echo '### Profile library'
+            echo
+            echo '```'
+            go run ./cmd/snmpprofilecheck | tail -3
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  distribution:
+    name: build a collector distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The builder version is read from the manifest so the two cannot drift.
+      - name: install the collector builder
+        run: |
+          version=$(awk '/otelcol_version:/ {print $2}' examples/builder-manifest.yaml)
+          echo "building against collector $version"
+          go install "go.opentelemetry.io/collector/cmd/builder@v${version}"
+
+      # The manifest's replaces entry points at a developer's working copy;
+      # repoint it at this checkout. Drop this once the module is tagged and
+      # fetchable and the replaces entry is removed.
+      - name: point the manifest at this checkout
+        run: |
+          sed -i "s#=> .*/networkdevicereceiver\$#=> ${GITHUB_WORKSPACE}#" examples/builder-manifest.yaml
+          grep -A2 '^replaces:' examples/builder-manifest.yaml
+
+      - name: build
+        run: builder --config examples/builder-manifest.yaml
+
+      # Proves the receiver's factory is registered in the built binary, which a
+      # compile alone does not: a component can build and still fail to load.
+      - name: verify the receiver is registered
+        run: |
+          ./_build/otelcol-tsuga components > components.yaml
+          cat components.yaml
+          grep -q 'networkdevice' components.yaml \
+            || { echo "::error::networkdevice receiver missing from the build"; exit 1; }
