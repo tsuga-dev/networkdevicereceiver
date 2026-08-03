@@ -165,7 +165,7 @@ func TestResolveTypeDispatch(t *testing.T) {
 			t.Errorf("sensor type %s has no case", code)
 			continue
 		}
-		entry, ok := r.EntryByName(target)
+		entry, ok := r.entries[target]
 		if !ok {
 			t.Errorf("case %s points at unknown entry %q", code, target)
 			continue

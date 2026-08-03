@@ -1,6 +1,9 @@
 package report_test
 
 import (
+	"maps"
+	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -26,8 +29,9 @@ const (
 	typeCelsius = 8
 	typeRPM     = 10
 
-	scaleUnits = 9
+	scaleMicro = 7
 	scaleMilli = 8
+	scaleUnits = 9
 	scaleKilo  = 10
 )
 
@@ -118,6 +122,8 @@ func TestSensorDispatchAndExponent(t *testing.T) {
 		sensorRow{index: "5", sensorType: typeWatts, scale: scaleMilli, prec: 0, raw: 1500},
 		// Power reported in kilowatts: 2 kW is 2000 W.
 		sensorRow{index: "6", sensorType: typeWatts, scale: scaleKilo, prec: 0, raw: 2},
+		// The far end of the enum: micro(7) is 10^-6, so 1000000 uW is 1 W.
+		sensorRow{index: "7", sensorType: typeWatts, scale: scaleMicro, prec: 0, raw: 1_000_000},
 	))
 
 	tests := []struct {
@@ -130,11 +136,12 @@ func TestSensorDispatchAndExponent(t *testing.T) {
 		{"hw.fan.speed", "ent_phy_sensor_4", 8700},
 		{"hw.power", "ent_phy_sensor_5", 1.5},
 		{"hw.power", "ent_phy_sensor_6", 2000},
+		{"hw.power", "ent_phy_sensor_7", 1},
 	}
 	for _, tc := range tests {
 		byID, ok := metrics[tc.metric]
 		if !ok {
-			t.Errorf("%s was not emitted; got %v", tc.metric, keysOfFloat(metrics))
+			t.Errorf("%s was not emitted; got %v", tc.metric, slices.Sorted(maps.Keys(metrics)))
 			continue
 		}
 		got, ok := byID[tc.id]
@@ -166,7 +173,7 @@ func TestSensorWithoutScaleColumnsIsUnscaled(t *testing.T) {
 	metrics := buildSensors(t, dev)
 	byID, ok := metrics["hw.temperature"]
 	if !ok {
-		t.Fatalf("hw.temperature not emitted; got %v", keysOfFloat(metrics))
+		t.Fatalf("hw.temperature not emitted; got %v", slices.Sorted(maps.Keys(metrics)))
 	}
 	if got := byID["ent_phy_sensor_1"]; !closeEnough(got, 41) {
 		t.Errorf("value = %v, want 41 with no exponent applied", got)
@@ -194,51 +201,7 @@ func TestSensorUnmappedTypeIsSkipped(t *testing.T) {
 	}
 }
 
-func TestSensorExponentUnitsAreCorrect(t *testing.T) {
-	// Verify the SI-prefix arithmetic directly across the enum's range.
-	cases := []struct {
-		scale, prec int
-		raw         float64
-		want        float64
-	}{
-		{scaleUnits, 0, 100, 100},
-		{scaleUnits, 1, 100, 10},
-		{scaleUnits, 2, 100, 1},
-		{scaleMilli, 0, 100, 0.1},
-		{scaleKilo, 0, 100, 100000},
-		// micro(7) is 10^-6.
-		{7, 0, 1_000_000, 1},
-	}
-	for _, tc := range cases {
-		metrics := buildSensors(t, sensorDevice(sensorRow{
-			index: "1", sensorType: typeWatts, scale: tc.scale, prec: tc.prec, raw: int(tc.raw),
-		}))
-		got := metrics["hw.power"]["ent_phy_sensor_1"]
-		if !closeEnough(got, tc.want) {
-			t.Errorf("scale=%d precision=%d raw=%v -> %v, want %v", tc.scale, tc.prec, tc.raw, got, tc.want)
-		}
-	}
-}
-
+// closeEnough compares a scaled reading, which carries float rounding.
 func closeEnough(got, want float64) bool {
-	diff := got - want
-	if diff < 0 {
-		diff = -diff
-	}
-	tolerance := 1e-9
-	if want != 0 {
-		tolerance = 1e-9 + want*1e-9
-		if tolerance < 0 {
-			tolerance = -tolerance
-		}
-	}
-	return diff <= tolerance
-}
-
-func keysOfFloat(m map[string]pointsByID) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
+	return math.Abs(got-want) <= 1e-9*math.Max(1, math.Abs(want))
 }

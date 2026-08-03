@@ -451,9 +451,6 @@ func sensorExponent(store *snmp.ValueStore, td *naming.TypeDispatch,
 			}
 		}
 	}
-	if exponent == 0 {
-		return 1
-	}
 	return math.Pow(10, float64(exponent))
 }
 
@@ -534,7 +531,7 @@ func buildAttributes(entry naming.Entry, tags map[string]string,
 	}
 	// A component metric outside hw.* also carries the interface name the system
 	// conventions expect, so it is identifiable on its own terms.
-	if entry.ComponentIdentity && name != "" && !strings.HasPrefix(metricName, "hw.") {
+	if name != "" && !strings.HasPrefix(metricName, "hw.") {
 		out["network.interface.name"] = name
 	}
 	return out
