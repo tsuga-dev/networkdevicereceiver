@@ -5,8 +5,8 @@ This product includes software developed at Tsuga.
 
 --------------------------------------------------------------------------------
 
-This product contains code and data derived from Datadog software, used under
-the Apache License, Version 2.0.
+This product contains code and data derived from Datadog software. The two
+Datadog sources carry different licenses; each is identified below.
 
 1. SNMP device profiles
 
@@ -17,7 +17,14 @@ the Apache License, Version 2.0.
    recorded in internal/profile/default_profiles/UPSTREAM-SHA.
 
    Source: https://github.com/DataDog/integrations-core
-   License: Apache License, Version 2.0
+   License: BSD 3-Clause License
+   Copyright (c) 2016, Datadog, Inc. All rights reserved.
+
+   The full license text, as published at the pinned upstream commit, is
+   reproduced in internal/profile/default_profiles/LICENSE.
+
+   Neither the name of integrations-core nor the names of its contributors
+   are used to endorse or promote this product.
 
 2. Profile schema, fetch strategy and value store
 
