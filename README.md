@@ -254,8 +254,12 @@ false spike.
 
 ## Attribution
 
-The profile schema, fetch strategy and profile library are ported from or
-vendored out of [DataDog/datadog-agent](https://github.com/DataDog/datadog-agent)
-and [DataDog/integrations-core](https://github.com/DataDog/integrations-core),
-both Apache-2.0. The embedded profiles' upstream commit is recorded in
-`internal/profile/default_profiles/UPSTREAM-SHA`.
+The profile schema and fetch strategy are ported from
+[DataDog/datadog-agent](https://github.com/DataDog/datadog-agent) (Apache-2.0).
+The embedded profile library is copied unmodified from
+[DataDog/integrations-core](https://github.com/DataDog/integrations-core)
+(BSD-3-Clause; see `internal/profile/default_profiles/LICENSE`), at the commit
+recorded in `internal/profile/default_profiles/UPSTREAM-SHA`. See `NOTICE` for
+the full attribution.
+
+Datadog does not endorse this receiver.
