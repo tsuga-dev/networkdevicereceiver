@@ -43,6 +43,15 @@ jobs:
       - name: build
         run: go build ./...
 
+      # documentation.md's per-metric reference is generated from the naming
+      # registry, so regenerating must be a no-op. A diff here means a mapping
+      # changed without `go generate ./...`, and the published docs are wrong.
+      - name: generated documentation is up to date
+        run: |
+          go generate ./...
+          git diff --exit-code -- documentation.md \
+            || { echo "::error::run 'go generate ./...' and commit documentation.md"; exit 1; }
+
       # -shuffle catches tests that depend on execution order; -race matters
       # because the receiver runs a discovery loop, a scheduler and a poller pool
       # concurrently.

@@ -139,6 +139,9 @@ Current coverage, measurable with `snmpprofilecheck`: **94%** of `_generic-if`'s
 symbols (the profile 136 of 240 others inherit) and about **21%** of symbol
 references across the whole corpus. The remaining tail resolves to tier 3.
 
+Every mapping and every transformation is documented per metric in
+[`documentation.md`](./documentation.md).
+
 ### Worked IF-MIB mapping
 
 | Profile symbol | Metric | Instrument | Unit | Notes |

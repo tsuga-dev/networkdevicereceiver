@@ -4,6 +4,10 @@
 # collect; corpus_test.go enforces both. Everything else resolves to a generated
 # snmp.* name, which is the honest place for a value whose meaning or magnitude
 # cannot be established.
+#
+# The metric_docs section at the end of this file documents each emitted metric.
+# It is read only by ./gendoc, which regenerates the per-metric reference in
+# documentation.md; run `go generate ./...` after changing a mapping.
 
 metrics:
   ifHCInOctets:
@@ -274,3 +278,85 @@ system_metrics:
     metric: system.memory.limit
     instrument: updowncounter
     unit: By
+
+# Documentation for the metrics the mappings above emit, keyed by metric name
+# rather than by symbol because several symbols feed one metric. Read only by
+# ./gendoc; the receiver ignores this section. Every emitted metric needs a
+# description, and a key naming no metric is an error, so neither can rot
+# unnoticed.
+metric_docs:
+  hw.network.io:
+    description: Bytes transferred on a physical interface.
+  hw.network.packets:
+    description: Packets transferred on a physical interface, split by packet class.
+    notes: |
+      `network.io.cast` is not a semantic convention; no convention models the
+      unicast/multicast/broadcast split.
+  hw.errors:
+    description: Interface errors.
+    notes: |
+      A discard is a deliberate drop rather than an error, and is reported
+      separately as `system.network.packet.dropped`.
+  hw.network.up:
+    description: Interface operational state as a boolean.
+  hw.status:
+    description: |-
+      Interface administrative state, as an OpenMetrics StateSet: one datapoint
+      per possible state, 1 for the active one and 0 for the rest.
+    notes: |
+      A value outside the mapping yields all-zero datapoints rather than none, so
+      a device in an unexpected state reads as "no known state active" instead of
+      dropping out of the series.
+  hw.network.bandwidth.limit:
+    description: Interface capacity.
+    notes: |
+      `ifHighSpeed` reports Mbit/s and `ifSpeed` bit/s. Where a profile collects
+      both they map to the same metric and the same attributes, so priority
+      decides: `ifSpeed` saturates at 4.29 Gbit/s.
+
+      The declared instrument overrides the profile here. Profiles call these
+      gauges, but the conventions fix this metric as an UpDownCounter.
+  hw.temperature:
+    description: Temperature, from an entity sensor or a UPS battery.
+  hw.voltage:
+    description: Voltage, from an entity sensor, a UPS battery or a UPS input line.
+    notes: |
+      `upsHighPrecInputLineVoltage` reports tenths of a volt.
+  hw.power:
+    description: Power drawn, from an entity sensor.
+  hw.fan.speed:
+    description: Fan speed, from an entity sensor.
+  hw.battery.charge:
+    description: UPS battery charge remaining, as a fraction of capacity.
+    notes: |
+      Both symbols report a percentage, scaled here to the fraction the
+      convention's unit requires.
+  hw.battery.time_left:
+    description: Estimated UPS runtime remaining on battery.
+    notes: |
+      `upsEstimatedMinutesRemaining` reports minutes.
+  system.network.packet.dropped:
+    description: Interface discards.
+    notes: |
+      `hw.*` models no dropped-packet metric, so these live under `system.*` but
+      opt into the component-identity attributes (`hw.id`, `hw.name` and
+      `network.interface.name`), which keeps them joinable to the `hw.network.*`
+      metrics for the same interface.
+  system.network.connection.count:
+    description: Established TCP connections.
+  system.uptime:
+    description: Time since the device's host resources were last initialised.
+    notes: |
+      `hrSystemUptime` reports TimeTicks, hundredths of a second.
+  system.cpu.utilization:
+    description: Device CPU utilisation, as a fraction.
+    notes: |
+      The symbol reports a percentage, scaled here to a fraction.
+  system.memory.utilization:
+    description: Device memory utilisation, as a fraction.
+    notes: |
+      The symbol reports a percentage, scaled here to a fraction.
+  system.memory.usage:
+    description: Device memory, by state.
+  system.memory.limit:
+    description: Total device memory.
