@@ -200,7 +200,7 @@ func pollDevice(opts options, credentials snmp.Credentials, profiles *profile.St
 	// Identify the device. sysName is read purely so the operator can confirm
 	// they are looking at the box they meant.
 	sysObjectID, sysName := device.SysObjectID, ""
-	store, _, _ := snmp.Fetch(session,
+	store, _, _ := snmp.Fetch(context.Background(), session,
 		[]string{discovery.OIDSysObjectID, discovery.OIDSysName}, nil, snmp.FetchConfig{})
 	if store != nil {
 		if v, err := store.Scalar(discovery.OIDSysObjectID); err == nil {
@@ -263,7 +263,7 @@ func pollDevice(opts options, credentials snmp.Credentials, profiles *profile.St
 		scalars, columns := compiled.FetchOIDs()
 		// fetchErr is only fatal when nothing came back: a partial poll is the
 		// normal case and still yields metrics.
-		values, fetchReport, fetchErr := snmp.Fetch(session, scalars, columns, snmp.FetchConfig{})
+		values, fetchReport, fetchErr := snmp.Fetch(context.Background(), session, scalars, columns, snmp.FetchConfig{})
 		if values == nil {
 			return fmt.Errorf("fetch: %w", fetchErr)
 		}

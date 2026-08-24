@@ -73,6 +73,12 @@ func (c Credentials) Validate() error {
 		if c.PrivProtocol != "" && c.PrivKey == "" {
 			return fmt.Errorf("priv_protocol %q set without priv_key", c.PrivProtocol)
 		}
+		// Without this check the derived security level would be AuthPriv while
+		// the privacy protocol resolves to NoPriv, which fails at runtime
+		// against every device instead of at startup.
+		if c.PrivKey != "" && c.PrivProtocol == "" {
+			return fmt.Errorf("priv_key set without priv_protocol")
+		}
 		if c.AuthProtocol != "" && c.AuthKey == "" {
 			return fmt.Errorf("auth_protocol %q set without auth_key", c.AuthProtocol)
 		}

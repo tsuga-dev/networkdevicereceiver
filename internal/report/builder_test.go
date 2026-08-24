@@ -1,6 +1,7 @@
 package report_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -111,7 +112,7 @@ func testDevice() report.DeviceInfo {
 func poll(t *testing.T, b *report.Builder, dev snmp.Session, compiled *profile.Compiled, at time.Time) pmetric.Metrics {
 	t.Helper()
 	scalars, columns := compiled.FetchOIDs()
-	store, _, err := snmp.Fetch(dev, scalars, columns, snmp.FetchConfig{})
+	store, _, err := snmp.Fetch(context.Background(), dev, scalars, columns, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -621,7 +622,7 @@ func TestCorpusProfilesBuildWithoutPanic(t *testing.T) {
 
 		b := newBuilder(t, naming.DefaultOptions())
 		scalars, columns := compiled.FetchOIDs()
-		values, _, _ := snmp.Fetch(dev, scalars, columns, snmp.FetchConfig{})
+		values, _, _ := snmp.Fetch(context.Background(), dev, scalars, columns, snmp.FetchConfig{})
 
 		md, _, err := b.Build(testDevice(), compiled, values, time.Now())
 		if err != nil && strings.Contains(err.Error(), "already emitted as") {
@@ -662,7 +663,7 @@ func TestBuildReportCountsGeneratedMetrics(t *testing.T) {
 	b := report.NewBuilder(registry)
 
 	scalars, columns := compiled.FetchOIDs()
-	values, _, err := snmp.Fetch(twoInterfaceDevice(1, 1), scalars, columns, snmp.FetchConfig{})
+	values, _, err := snmp.Fetch(context.Background(), twoInterfaceDevice(1, 1), scalars, columns, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,8 @@
 package snmp_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -28,7 +30,7 @@ func TestFetchScalars(t *testing.T) {
 		SetString(sysName, "switch-1").
 		SetOID(sysObjectID, "1.3.6.1.4.1.9.1.1")
 
-	store, report, err := snmp.Fetch(dev, []string{sysUpTime, sysName, sysObjectID}, nil, snmp.FetchConfig{})
+	store, report, err := snmp.Fetch(context.Background(), dev, []string{sysUpTime, sysName, sysObjectID}, nil, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -66,7 +68,7 @@ func TestFetchScalars(t *testing.T) {
 func TestFetchScalarMissingIsReportedNotFatal(t *testing.T) {
 	dev := snmptest.New().SetInt(sysUpTime, 1)
 
-	store, report, err := snmp.Fetch(dev, []string{sysUpTime, unsupportedOI}, nil, snmp.FetchConfig{})
+	store, report, err := snmp.Fetch(context.Background(), dev, []string{sysUpTime, unsupportedOI}, nil, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("an unsupported OID must not fail the poll: %v", err)
 	}
@@ -86,7 +88,7 @@ func TestFetchScalarV1NoSuchName(t *testing.T) {
 	dev := snmptest.New().SetInt(sysUpTime, 1).SetString(sysName, "sw")
 	dev.V1 = true
 
-	store, report, err := snmp.Fetch(dev, []string{sysUpTime, unsupportedOI, sysName}, nil, snmp.FetchConfig{})
+	store, report, err := snmp.Fetch(context.Background(), dev, []string{sysUpTime, unsupportedOI, sysName}, nil, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestFetchScalarsShrinkOnTooBig(t *testing.T) {
 	// The device only tolerates two OIDs per GET.
 	dev.TooBigOver = 2
 
-	store, _, err := snmp.Fetch(dev, oids, nil, snmp.FetchConfig{OIDBatchSize: 8})
+	store, _, err := snmp.Fetch(context.Background(), dev, oids, nil, snmp.FetchConfig{OIDBatchSize: 8})
 	if err != nil {
 		t.Fatalf("Fetch should recover by shrinking: %v", err)
 	}
@@ -128,7 +130,7 @@ func TestFetchScalarsGivesUpWhenSingleOIDTooBig(t *testing.T) {
 	dev := snmptest.New().SetInt(sysUpTime, 1).SetString(sysName, "sw")
 	dev.AlwaysTooBig = true
 
-	_, _, err := snmp.Fetch(dev, []string{sysUpTime, sysName}, nil, snmp.FetchConfig{OIDBatchSize: 4})
+	_, _, err := snmp.Fetch(context.Background(), dev, []string{sysUpTime, sysName}, nil, snmp.FetchConfig{OIDBatchSize: 4})
 	if err == nil {
 		t.Fatal("expected an error when even a single-OID GET is rejected")
 	}
@@ -139,7 +141,7 @@ func TestFetchColumnsGivesUpWhenAlwaysTooBig(t *testing.T) {
 	dev.SetCounter64(ifInOctets+".1", 1)
 	dev.AlwaysTooBig = true
 
-	if _, _, err := snmp.Fetch(dev, nil, []string{ifInOctets}, snmp.FetchConfig{}); err == nil {
+	if _, _, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets}, snmp.FetchConfig{}); err == nil {
 		t.Fatal("expected an error when a column walk is always rejected")
 	}
 }
@@ -157,7 +159,7 @@ func TestFetchColumnsManyRows(t *testing.T) {
 		dev.SetCounter64(ifInOctets+"."+index, uint64(i*1000))
 	}
 
-	store, report, err := snmp.Fetch(dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
+	store, report, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -192,7 +194,7 @@ func TestFetchColumnsMultipleColumnsAndTypes(t *testing.T) {
 		dev.SetInt(ifOperStatus+"."+index, 1)
 	}
 
-	store, _, err := snmp.Fetch(dev, nil,
+	store, _, err := snmp.Fetch(context.Background(), dev, nil,
 		[]string{ifInOctets, ifOutOctets, ifName, ifOperStatus}, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -233,7 +235,7 @@ func TestFetchColumnsWalkStaysInSubtree(t *testing.T) {
 	dev.SetCounter64(ifInOctets+".1", 111)
 	dev.SetCounter64(ifOutOctets+".1", 999)
 
-	store, _, err := snmp.Fetch(dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
+	store, _, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +260,7 @@ func TestFetchColumnsGetNextFallback(t *testing.T) {
 	}
 	dev.NoGetBulk = true
 
-	store, _, err := snmp.Fetch(dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
+	store, _, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("Fetch should fall back to GETNEXT: %v", err)
 	}
@@ -281,7 +283,7 @@ func TestFetchColumnsV1UsesGetNext(t *testing.T) {
 	}
 	dev.V1 = true
 
-	_, _, err := snmp.Fetch(dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
+	_, _, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +301,7 @@ func TestFetchColumnsTruncatesRunawayTable(t *testing.T) {
 		dev.SetCounter64(ifInOctets+"."+fmt.Sprint(i), uint64(i))
 	}
 
-	store, report, err := snmp.Fetch(dev, nil, []string{ifInOctets},
+	store, report, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets},
 		snmp.FetchConfig{MaxRowsPerColumn: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -316,7 +318,7 @@ func TestFetchColumnsTruncatesRunawayTable(t *testing.T) {
 func TestFetchColumnsEmptyTable(t *testing.T) {
 	dev := snmptest.New().SetInt(sysUpTime, 1)
 
-	store, _, err := snmp.Fetch(dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
+	store, _, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets}, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatalf("an absent table is not an error: %v", err)
 	}
@@ -333,7 +335,7 @@ func TestFetchTransportFailureIsReported(t *testing.T) {
 	dev := snmptest.New().SetInt(sysUpTime, 1)
 	dev.FailNext = 100
 
-	_, _, err := snmp.Fetch(dev, []string{sysUpTime}, nil, snmp.FetchConfig{OIDBatchSize: 1})
+	_, _, err := snmp.Fetch(context.Background(), dev, []string{sysUpTime}, nil, snmp.FetchConfig{OIDBatchSize: 1})
 	if err == nil {
 		t.Error("a persistent transport failure must surface")
 	}
@@ -349,13 +351,13 @@ func TestFetchBulkRepetitionsReduceePDUs(t *testing.T) {
 	}
 
 	small := build()
-	_, reportSmall, err := snmp.Fetch(small, nil, []string{ifInOctets},
+	_, reportSmall, err := snmp.Fetch(context.Background(), small, nil, []string{ifInOctets},
 		snmp.FetchConfig{BulkMaxRepetitions: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	large := build()
-	_, reportLarge, err := snmp.Fetch(large, nil, []string{ifInOctets},
+	_, reportLarge, err := snmp.Fetch(context.Background(), large, nil, []string{ifInOctets},
 		snmp.FetchConfig{BulkMaxRepetitions: 20})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +376,7 @@ func TestDecodeCounter64FromOctets(t *testing.T) {
 		Type:  gosnmp.Counter64,
 		Value: []byte{0, 0, 0, 0, 0, 0, 1, 0},
 	})
-	store, _, err := snmp.Fetch(dev, []string{"1.2.3.4.0"}, nil, snmp.FetchConfig{})
+	store, _, err := snmp.Fetch(context.Background(), dev, []string{"1.2.3.4.0"}, nil, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,5 +390,114 @@ func TestDecodeCounter64FromOctets(t *testing.T) {
 	}
 	if got != 256 {
 		t.Errorf("decoded %v, want 256", got)
+	}
+}
+
+// TestFetchCancelledSendsNoPDUs checks cancellation is honoured at the PDU
+// boundary, which is what lets Shutdown return promptly instead of retrying
+// through a dead device's whole OID list.
+func TestFetchCancelledSendsNoPDUs(t *testing.T) {
+	dev := snmptest.New().SetInt(sysUpTime, 1).SetCounter64(ifInOctets+".1", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, report, err := snmp.Fetch(ctx, dev, []string{sysUpTime}, []string{ifInOctets}, snmp.FetchConfig{})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if report.PDUs != 0 {
+		t.Errorf("sent %d PDUs after cancellation", report.PDUs)
+	}
+}
+
+// TestFetchScalarTransientEmptyAnswerIsNotPruned distinguishes "the device does
+// not implement this OID" (noSuchObject, prune) from "no value right now"
+// (noSuchInstance or Null, ask again next poll). Pruning the latter would
+// silence the metric for the life of the process after one warm-up poll.
+func TestFetchScalarTransientEmptyAnswerIsNotPruned(t *testing.T) {
+	const warmingUp = "1.3.6.1.4.1.9.9.1.0"
+	dev := snmptest.New().
+		SetInt(sysUpTime, 1).
+		Set(sysName, gosnmp.SnmpPDU{Type: gosnmp.Null}).
+		Set(warmingUp, gosnmp.SnmpPDU{Type: gosnmp.NoSuchInstance})
+
+	_, report, err := snmp.Fetch(context.Background(), dev,
+		[]string{sysUpTime, sysName, warmingUp}, nil, snmp.FetchConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, oid := range []string{sysName, warmingUp} {
+		if slices.Contains(report.MissingOIDs, oid) {
+			t.Errorf("%s answered a transient sentinel and must not be pruned: %v", oid, report.MissingOIDs)
+		}
+	}
+}
+
+// TestFetchColumnsV1EndOfMibKeepsSiblingColumns covers the RFC 1157 failure
+// mode: when one column of a batched GETNEXT walks off the end of the MIB, the
+// agent fails the whole PDU with noSuchName. Only that column has ended; the
+// others' remaining rows must still be collected.
+func TestFetchColumnsV1EndOfMibKeepsSiblingColumns(t *testing.T) {
+	dev := snmptest.New()
+	dev.V1 = true
+	// ifOutOctets is the last subtree in the fake's MIB and is shorter, so its
+	// walk hits end-of-MIB while ifInOctets still has rows.
+	for i := 1; i <= 5; i++ {
+		dev.SetCounter32(ifInOctets+"."+fmt.Sprint(i), uint(i))
+	}
+	dev.SetCounter32(ifOutOctets+".1", 100)
+	dev.SetCounter32(ifOutOctets+".2", 200)
+
+	store, _, err := snmp.Fetch(context.Background(), dev, nil,
+		[]string{ifInOctets, ifOutOctets}, snmp.FetchConfig{})
+	if err != nil {
+		t.Fatalf("noSuchName at end of MIB is not an error: %v", err)
+	}
+
+	in, err := store.Column(ifInOctets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in) != 5 {
+		t.Errorf("ifInOctets has %d rows, want 5 -- the sibling's end-of-MIB truncated it", len(in))
+	}
+	out, err := store.Column(ifOutOctets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Errorf("ifOutOctets has %d rows, want 2", len(out))
+	}
+}
+
+// TestFetchColumnsRowCapIsFinal checks a column that hit max_rows_per_column
+// stays ended: a later repetition in the same packet carrying an undecodable
+// value must not resurrect the walk or duplicate the truncation report.
+func TestFetchColumnsRowCapIsFinal(t *testing.T) {
+	dev := snmptest.New()
+	dev.SetCounter64(ifInOctets+".1", 1)
+	dev.SetCounter64(ifInOctets+".2", 2)
+	dev.SetCounter64(ifInOctets+".3", 3)
+	dev.Set(ifInOctets+".4", gosnmp.SnmpPDU{Type: gosnmp.Null})
+	dev.SetCounter64(ifInOctets+".5", 5)
+
+	store, report, err := snmp.Fetch(context.Background(), dev, nil, []string{ifInOctets},
+		snmp.FetchConfig{MaxRowsPerColumn: 2, BulkMaxRepetitions: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	col, _ := store.Column(ifInOctets)
+	if len(col) > 2 {
+		t.Errorf("collected %d rows past the cap of 2", len(col))
+	}
+	truncations := 0
+	for _, column := range report.TruncatedColumns {
+		if column == ifInOctets {
+			truncations++
+		}
+	}
+	if truncations != 1 {
+		t.Errorf("column reported truncated %d times, want exactly once", truncations)
 	}
 }

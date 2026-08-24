@@ -150,7 +150,7 @@ func (s *Scanner) probe(ctx context.Context, address string, subnet SubnetConfig
 			continue
 		}
 
-		sysObjectID, ok := ProbeSysObjectID(session)
+		sysObjectID, ok := ProbeSysObjectID(ctx, session)
 		_ = session.Close()
 		if !ok {
 			continue
@@ -175,10 +175,10 @@ func (s *Scanner) probe(ctx context.Context, address string, subnet SubnetConfig
 // ProbeSysObjectID reads the OID that both proves a connected device speaks SNMP
 // and selects its profile. Without sysObjectID a device is not usable even if
 // something answered, so a failure here is reported as "not found".
-func ProbeSysObjectID(session snmp.Session) (sysObjectID string, ok bool) {
+func ProbeSysObjectID(ctx context.Context, session snmp.Session) (sysObjectID string, ok bool) {
 	// A partial answer still proves the device is there and speaks SNMP, so the
 	// fetch error only matters when nothing came back at all.
-	store, _, err := snmp.Fetch(session, []string{OIDSysObjectID}, nil, snmp.FetchConfig{})
+	store, _, err := snmp.Fetch(ctx, session, []string{OIDSysObjectID}, nil, snmp.FetchConfig{})
 	if err != nil && store == nil {
 		return "", false
 	}

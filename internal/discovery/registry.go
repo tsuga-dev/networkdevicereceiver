@@ -135,6 +135,14 @@ func (r *Registry) Get(id string) (Device, bool) {
 	return *dev, true
 }
 
+// Remove deletes a device, however it was registered. Used when a restored
+// entry duplicates a statically configured device.
+func (r *Registry) Remove(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.devices, id)
+}
+
 // SetProfile records the profile a device matched, so the next poll does not
 // have to rediscover it.
 func (r *Registry) SetProfile(id, sysObjectID, profileName string) {

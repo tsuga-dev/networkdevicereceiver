@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosnmp/gosnmp"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
@@ -560,4 +562,142 @@ func TestMetricsAreValid(t *testing.T) {
 			}
 		}
 	}
+}
+
+// slowSession delays every request, standing in for a lossy or distant device
+// whose poll outlasts the collection interval.
+type slowSession struct {
+	snmp.Session
+	delay time.Duration
+	enter func()
+	exit  func()
+}
+
+func (s *slowSession) Connect() error { s.enter(); return s.Session.Connect() }
+func (s *slowSession) Close() error   { s.exit(); return s.Session.Close() }
+
+func (s *slowSession) Get(oids []string) (*gosnmp.SnmpPacket, error) {
+	time.Sleep(s.delay)
+	return s.Session.Get(oids)
+}
+
+func (s *slowSession) GetBulk(oids []string, maxRepetitions uint32) (*gosnmp.SnmpPacket, error) {
+	time.Sleep(s.delay)
+	return s.Session.GetBulk(oids, maxRepetitions)
+}
+
+// TestReceiverNeverPollsDeviceConcurrently: a device whose poll runs longer
+// than the collection interval must not be dispatched to a second worker while
+// the first is still running -- two concurrent polls race on the device's
+// builder state and emit duplicate cumulative streams.
+func TestReceiverNeverPollsDeviceConcurrently(t *testing.T) {
+	f := newFleet("public", "10.9.9.5")
+
+	var mu sync.Mutex
+	active, maxActive, finished := 0, 0, 0
+
+	cfg := createDefaultConfig().(*Config)
+	cfg.CollectionInterval = 50 * time.Millisecond
+	cfg.Timeout = 50 * time.Millisecond
+	cfg.Devices = []DeviceConfig{{
+		Endpoint:    "10.9.9.5",
+		Credentials: snmp.Credentials{Version: "v2c", Community: "public"},
+		Profile:     "cisco-catalyst",
+	}}
+
+	dial := func(c snmp.ConnectionConfig) (snmp.Session, error) {
+		inner, err := f.dial(c)
+		if err != nil {
+			return nil, err
+		}
+		return &slowSession{
+			Session: inner,
+			delay:   20 * time.Millisecond,
+			enter: func() {
+				mu.Lock()
+				active++
+				if active > maxActive {
+					maxActive = active
+				}
+				mu.Unlock()
+			},
+			exit: func() {
+				mu.Lock()
+				active--
+				finished++
+				mu.Unlock()
+			},
+		}, nil
+	}
+
+	startReceiver(t, cfg, dial)
+	waitFor(t, 20*time.Second, "several polls to complete", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return finished >= 3
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if maxActive != 1 {
+		t.Errorf("%d polls of the same device ran concurrently, want 1", maxActive)
+	}
+}
+
+// TestReceiverStaticDeviceIsNotDuplicatedByScan: a devices: entry that also
+// lives inside a scanned subnet must keep a single registry identity, or it is
+// polled twice per interval under two different resources.
+func TestReceiverStaticDeviceIsNotDuplicatedByScan(t *testing.T) {
+	f := newFleet("public", "10.0.0.1", "10.0.0.2")
+
+	cfg := subnetTestConfig("10.0.0.0/29", "public")
+	cfg.Devices = []DeviceConfig{{
+		Endpoint:    "10.0.0.1",
+		Credentials: snmp.Credentials{Version: "v2c", Community: "public"},
+	}}
+
+	r, _ := startReceiver(t, cfg, f.dial)
+	waitFor(t, 5*time.Second, "the scan to register the other device", func() bool {
+		_, ok := r.devices.Get(discovery.DeviceID("10.0.0.2", "10.0.0.0/29"))
+		return ok
+	})
+
+	entries := 0
+	for _, dev := range r.devices.Devices() {
+		if dev.Address != "10.0.0.1" {
+			continue
+		}
+		entries++
+		if !dev.Static {
+			t.Errorf("scan registered a duplicate identity %q for the static device", dev.ID)
+		}
+	}
+	if entries != 1 {
+		t.Errorf("static device has %d registry entries, want exactly 1", entries)
+	}
+}
+
+// TestReceiverAgesOutDeviceWhoseSubnetWasRemoved: a restored device whose
+// subnet is no longer configured can never poll successfully; it must spend its
+// failure budget and be dropped rather than being error-logged forever.
+func TestReceiverAgesOutDeviceWhoseSubnetWasRemoved(t *testing.T) {
+	f := newFleet("public", "10.0.0.1")
+	cfg := subnetTestConfig("10.0.0.0/30", "public")
+	cfg.Discovery.AllowedFailures = 1
+	cfg.Discovery.RediscoveryInterval = time.Hour
+
+	r, _ := startReceiver(t, cfg, f.dial)
+
+	zombie := discovery.Device{
+		ID:       discovery.DeviceID("10.99.0.1", "10.99.0.0/24"),
+		Address:  "10.99.0.1",
+		Subnet:   "10.99.0.0/24",
+		LastSeen: time.Now(),
+	}
+	r.devices.Upsert(zombie)
+
+	waitFor(t, 10*time.Second, "the orphaned device to be dropped", func() bool {
+		_, ok := r.devices.Get(zombie.ID)
+		return !ok
+	})
 }
