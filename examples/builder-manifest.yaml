@@ -1,5 +1,6 @@
 # OpenTelemetry Collector Builder manifest for a distribution including this
-# receiver.
+# receiver. This is the manifest the release workflow builds, so what you get
+# locally is what a tag publishes.
 #
 #   go install go.opentelemetry.io/collector/cmd/builder@v0.157.0
 #   builder --config examples/builder-manifest.yaml
@@ -11,28 +12,52 @@
 
 dist:
   name: otelcol-tsuga
-  description: Tsuga collector distribution with the SNMP network device receiver
+  description: Tsuga collector distribution for network monitoring
   output_path: ./_build
   otelcol_version: 0.157.0
 
 receivers:
   - gomod: github.com/tsuga-dev/networkdevicereceiver v0.1.0
+  # Flow records from routers and switches. The receiver speaks NetFlow v5/v9,
+  # IPFIX and sFlow, which together cover what network gear actually exports.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/netflowreceiver v0.157.0
+  # Network devices report state changes over syslog, not SNMP. Note that
+  # binding the conventional port 514 needs NET_BIND_SERVICE; use a high port
+  # otherwise.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/syslogreceiver v0.157.0
   - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.157.0
 
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.157.0
   - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.157.0
+  # SNMP interface counters are monotonic since device boot. Backends that want
+  # rates need deltas, and a counter that wraps or resets on reboot is handled
+  # here rather than by every consumer.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/cumulativetodeltaprocessor v0.157.0
+  # OTTL, for enriching device metrics with site or tenant attributes and for
+  # dropping fields that should not leave the network.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.157.0
+  # Identifies the host the collector polls from, which is the thing that
+  # distinguishes two collectors watching overlapping subnets.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor v0.157.0
 
 exporters:
   # debugexporter is what you want while validating device coverage: it prints
   # the metrics the receiver produced.
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.157.0
   - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.157.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.157.0
 
 extensions:
   # Persists the discovered device set, so a restart resumes monitoring instead
   # of rescanning every subnet first.
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.157.0
+  # Liveness for orchestrators.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.157.0
+  # Reports agent health and effective config to an OpAMP server. Remote config
+  # management additionally needs the opampsupervisor binary, which is not part
+  # of this distribution.
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/opampextension v0.157.0
 
 # While the receiver is unreleased and the repository is private, build against
 # the working copy. Remove this once the module is tagged and reachable, and pin

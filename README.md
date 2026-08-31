@@ -87,13 +87,70 @@ whose `sysobjectid` glob is the most specific match. `generic-device.yaml`
 claims `1.3.6.1.4.*`, so an unrecognised enterprise device still gets basic
 monitoring rather than nothing.
 
-Validate profiles before deploying them:
+### Custom profiles
+
+`profiles.user_dir` is loaded on top of the embedded set, and a user profile
+shadows an embedded one of the same name entirely. So correcting a shipped
+profile means copying it out of `internal/profile/default_profiles/`, editing it,
+and dropping it in `user_dir` under the same filename — there is no merge to
+reason about.
+
+A minimal profile for a device the library does not cover:
+
+```yaml
+# /etc/otelcol/snmp.d/profiles/acme-switch.yaml
+extends:
+  - _base.yaml          # sysName, sysDescr, sysObjectID, uptime
+  - _generic-if.yaml    # IF-MIB interface metrics and metadata
+
+sysobjectid: 1.3.6.1.4.1.99999.1.*
+
+metadata:
+  device:
+    fields:
+      vendor:
+        value: "acme"
+
+metrics:
+  # A scalar OID.
+  - MIB: ACME-MIB
+    symbol:
+      OID: 1.3.6.1.4.1.99999.2.1.0
+      name: cpu.usage
+  # A table: one datapoint per row, tagged from the row index.
+  - MIB: ACME-MIB
+    table:
+      OID: 1.3.6.1.4.1.99999.3.1
+      name: acmePsuTable
+    symbols:
+      - OID: 1.3.6.1.4.1.99999.3.1.1.4
+        name: psu.temperature
+    metric_tags:
+      - index: 1
+        tag: psu
+```
+
+Choose symbol names deliberately, because the naming registry is keyed by symbol
+name and ignores the MIB. Reusing a name the registry already models is how a
+custom profile inherits a semantic-convention mapping for free: `cpu.usage`
+above is emitted as `system.cpu.utilization`, rescaled from percent. A name the
+registry does not know is never dropped — it gets a deterministic fallback
+derived from the MIB and symbol, so `psu.temperature` under `ACME-MIB` arrives as
+`snmp.acme.psu.temperature`. Grep `internal/naming/registry.yaml` for the
+symbols already mapped.
+
+Validate before deploying — an unresolvable `extends`, a malformed table or a
+`sysobjectid` that collides with a shipped profile all surface here rather than
+as quietly missing metrics:
 
 ```console
 $ go run ./cmd/snmpprofilecheck -user-dir /etc/otelcol/snmp.d/profiles
-$ go run ./cmd/snmpprofilecheck -profile cisco-catalyst -coverage
-$ go run ./cmd/snmpprofilecheck -sysobjectid 1.3.6.1.4.1.9.1.1745
+$ go run ./cmd/snmpprofilecheck -profile acme-switch -coverage
+$ go run ./cmd/snmpprofilecheck -sysobjectid 1.3.6.1.4.1.99999.1.7
 ```
+
+`snmpprofilecheck` is not in the release archives, so validating against a
+released binary needs this repository checked out at the matching tag.
 
 ## Metric naming
 
@@ -225,6 +282,48 @@ false spike.
   across restarts.
 - Subnets wider than 65536 addresses are refused rather than attempted; raise
   `max_hosts` per subnet to override.
+
+## Distribution
+
+Pushing a `v*` tag builds `otelcol-tsuga`, a collector distribution aimed at
+network monitoring, and publishes it two ways: `tar.gz` archives for
+linux/amd64, linux/arm64 and darwin/arm64 on the GitHub release, and a
+multi-arch image at `ghcr.io/tsuga-dev/otelcol-tsuga`.
+
+Beyond this receiver it carries the netflow receiver (NetFlow v5/v9, IPFIX and
+sFlow) and the syslog receiver, so one binary covers the three ways network
+gear reports; `cumulative_to_delta` for SNMP's boot-relative counters;
+`transform` for OTTL enrichment and redaction; `resource_detection`; the otlp
+and debug exporters; and the file storage, health check and opamp extensions.
+
+`examples/builder-manifest.yaml` is that exact manifest, so a local build
+matches what a tag publishes:
+
+```sh
+go install go.opentelemetry.io/collector/cmd/builder@v0.157.0
+builder --config examples/builder-manifest.yaml
+./_build/otelcol-tsuga --config examples/two-subnets.yaml
+```
+
+Profiles need no packaging. The ~240 embedded profiles are compiled into the
+binary, so the image is one static file and the version you run is the version
+CI linted. Adding your own means mounting a directory and pointing
+`profiles.user_dir` at it; read-only is fine, and the nonroot user needs only
+read access:
+
+```sh
+docker run --rm \
+  -v ./config.yaml:/etc/otelcol/config.yaml:ro \
+  -v ./profiles:/etc/otelcol/profiles:ro \
+  ghcr.io/tsuga-dev/otelcol-tsuga:v0.1.0 --config /etc/otelcol/config.yaml
+```
+
+See [Custom profiles](#custom-profiles) for what goes in that directory.
+
+The image runs as nonroot, which is enough for this receiver: discovery and
+polling are outbound SNMP on UDP/161, with no raw sockets. Receiving syslog on
+the conventional port 514 is the exception and needs `NET_BIND_SERVICE`, so
+prefer a high port.
 
 ## Known gaps
 
