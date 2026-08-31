@@ -108,7 +108,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # setup-go keys its cache on this repository's go.sum, which is the
+          # wrong key here: the ~610 modules this job downloads come from the
+          # generated _build module, so nothing was ever reused and every run
+          # re-fetched the graph. Cached below on the manifest instead.
+          cache: false
+
+      # Keyed on the manifest because the manifest determines the graph. The
+      # restore-keys prefix matters more than the exact hit: changing one
+      # component still reuses the other few hundred modules rather than
+      # re-downloading everything, which is what exposed this job to transient
+      # sum.golang.org failures.
+      - name: cache the module graph
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: otelcol-dist-${{ runner.os }}-${{ hashFiles('go.mod', 'examples/builder-manifest.yaml') }}
+          restore-keys: otelcol-dist-${{ runner.os }}-
 
       # The builder version is read from the manifest so the two cannot drift.
       - name: install the collector builder

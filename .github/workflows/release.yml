@@ -21,7 +21,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # Cached below on the manifest instead: the graph this job downloads
+          # comes from the generated _build module, not this repository's go.sum.
+          cache: false
+
+      # Same key as ci.yml's distribution job, deliberately: a release reuses the
+      # cache a merged PR already warmed. Runs before the manifest is rewritten
+      # so the key hashes the committed file and both workflows agree.
+      - name: cache the module graph
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: otelcol-dist-${{ runner.os }}-${{ hashFiles('go.mod', 'examples/builder-manifest.yaml') }}
+          restore-keys: otelcol-dist-${{ runner.os }}-
 
       # The builder version is read from the manifest so the two cannot drift.
       - name: install the collector builder
