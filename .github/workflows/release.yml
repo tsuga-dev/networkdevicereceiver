@@ -57,7 +57,9 @@ jobs:
             out="${GITHUB_WORKSPACE}/dist/${goos}_${goarch}"
             mkdir -p "$out"
             echo "building $target"
-            GOOS=$goos GOARCH=$goarch go build -trimpath -o "$out/otelcol-tsuga" .
+            # -s -w matches what the builder passes for its own compile. It cuts
+            # ~28% off the binary, in every archive and both image layers.
+            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags="-s -w" -o "$out/otelcol-tsuga" .
           done
 
       # Proves every shipped factory is registered in the built binary, which a
@@ -86,7 +88,7 @@ jobs:
               -C "$dir" otelcol-tsuga \
               -C "$GITHUB_WORKSPACE" README.md LICENSE NOTICE
           done
-          (cd artifacts && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+          (cd artifacts && sha256sum -- *.tar.gz > SHA256SUMS && cat SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
         with:
