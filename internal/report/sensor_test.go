@@ -1,6 +1,7 @@
 package report_test
 
 import (
+	"context"
 	"maps"
 	"math"
 	"slices"
@@ -75,7 +76,7 @@ func buildSensors(t *testing.T, dev snmp.Session) map[string]pointsByID {
 	builder := report.NewBuilder(registry)
 
 	scalars, columns := compiled.FetchOIDs()
-	values, _, err := snmp.Fetch(dev, scalars, columns, snmp.FetchConfig{})
+	values, _, err := snmp.Fetch(context.Background(), dev, scalars, columns, snmp.FetchConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

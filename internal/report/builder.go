@@ -251,6 +251,11 @@ func (b *Builder) emitTableMetric(pool *metricPool, resolver *tagResolver, store
 	var errs []error
 	component := componentPrefix(m.Table.Name, m.Table.OID)
 
+	// Row tags depend only on the row index, not the symbol, so resolve each
+	// row once and share the result across the metric's symbols: tag resolution
+	// (column lookups, index transforms, regexes) is the hot path of a poll.
+	rowTagCache := map[string]map[string]string{}
+
 	for _, sym := range m.Symbols {
 		rows, err := b.rowsFor(store, m, sym)
 		if err != nil {
@@ -258,9 +263,14 @@ func (b *Builder) emitTableMetric(pool *metricPool, resolver *tagResolver, store
 			continue
 		}
 		for _, index := range sortedIndexes(rows) {
-			tags, tagErr := resolver.rowTags(m.MetricTags, index)
-			if tagErr != nil {
-				errs = append(errs, tagErr)
+			tags, cached := rowTagCache[index]
+			if !cached {
+				var tagErr error
+				tags, tagErr = resolver.rowTags(m.MetricTags, index)
+				if tagErr != nil {
+					errs = append(errs, tagErr)
+				}
+				rowTagCache[index] = tags
 			}
 			attrs := mergeTags(nil, static, tags)
 

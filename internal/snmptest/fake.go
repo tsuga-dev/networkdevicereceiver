@@ -166,7 +166,9 @@ func (f *Fake) next(after string) (gosnmp.SnmpPDU, bool) {
 	return gosnmp.SnmpPDU{}, false
 }
 
-// GetNext returns the successor of each requested OID.
+// GetNext returns the successor of each requested OID. On v1, an OID with no
+// successor fails the whole request with noSuchName and the request varbinds
+// echoed back, as RFC 1157 agents do; v2c+ answers endOfMibView per varbind.
 func (f *Fake) GetNext(oids []string) (*gosnmp.SnmpPacket, error) {
 	f.GetNexts++
 	if packet, err := f.checkFaults(len(oids)); packet != nil || err != nil {
@@ -174,9 +176,12 @@ func (f *Fake) GetNext(oids []string) (*gosnmp.SnmpPacket, error) {
 	}
 
 	out := &gosnmp.SnmpPacket{}
-	for _, oid := range oids {
+	for i, oid := range oids {
 		pdu, ok := f.next(snmp.CanonicalOID(oid))
 		if !ok {
+			if f.V1 {
+				return f.v1NoSuchName(oids, i), nil
+			}
 			out.Variables = append(out.Variables, gosnmp.SnmpPDU{
 				Name: oid,
 				Type: gosnmp.EndOfMibView,
@@ -186,6 +191,22 @@ func (f *Fake) GetNext(oids []string) (*gosnmp.SnmpPacket, error) {
 		out.Variables = append(out.Variables, pdu)
 	}
 	return out, nil
+}
+
+// v1NoSuchName builds the RFC 1157 error response: the whole request fails,
+// error-index points at the offending varbind, and the request is echoed.
+func (f *Fake) v1NoSuchName(oids []string, failed int) *gosnmp.SnmpPacket {
+	out := &gosnmp.SnmpPacket{
+		Error:      gosnmp.NoSuchName,
+		ErrorIndex: uint8(failed + 1),
+	}
+	for _, oid := range oids {
+		out.Variables = append(out.Variables, gosnmp.SnmpPDU{
+			Name: "." + snmp.CanonicalOID(oid),
+			Type: gosnmp.Null,
+		})
+	}
+	return out
 }
 
 // GetBulk returns up to maxRepetitions successors per requested OID, in

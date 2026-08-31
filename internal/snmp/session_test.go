@@ -55,6 +55,15 @@ func TestCredentialsValidate(t *testing.T) {
 			wantErr: "requires an auth_key",
 		},
 		{
+			name: "v3 priv_key without priv_protocol",
+			creds: Credentials{
+				Version: "v3", User: "admin",
+				AuthProtocol: "SHA", AuthKey: "authpass",
+				PrivKey: "privpass",
+			},
+			wantErr: "without priv_protocol",
+		},
+		{
 			name: "v3 auth protocol without key",
 			creds: Credentials{
 				Version: "v3", User: "admin", AuthProtocol: "SHA256",

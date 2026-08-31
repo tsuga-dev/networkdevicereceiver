@@ -41,6 +41,11 @@ type snmpReceiver struct {
 	// dial is injectable so tests can drive the receiver without a network.
 	dial discovery.Dialer
 
+	// staticHosts are the addresses of the devices: entries, so a subnet scan
+	// does not register a second identity for a device the operator already
+	// configured explicitly.
+	staticHosts map[string]struct{}
+
 	mu    sync.Mutex
 	state map[string]*deviceState
 
@@ -212,11 +217,13 @@ func (r *snmpReceiver) storageClient(ctx context.Context, host component.Host) (
 
 // seedStaticDevices registers the explicitly configured devices.
 func (r *snmpReceiver) seedStaticDevices() error {
+	r.staticHosts = make(map[string]struct{}, len(r.cfg.Devices))
 	for i, device := range r.cfg.Devices {
 		host, port, err := parseEndpoint(device.Endpoint)
 		if err != nil {
 			return fmt.Errorf("devices[%d]: %w", i, err)
 		}
+		r.staticHosts[host] = struct{}{}
 		r.devices.Upsert(discovery.Device{
 			ID:          discovery.DeviceID(host, ""),
 			Address:     host,
@@ -225,6 +232,19 @@ func (r *snmpReceiver) seedStaticDevices() error {
 			Static:      true,
 			LastSeen:    time.Now(),
 		})
+	}
+
+	// A static device that also lives inside a scanned subnet may have been
+	// discovered (and persisted) under a second, subnet-scoped identity. Two
+	// entries mean the device is polled twice per interval and its metrics are
+	// emitted under two different resources, so the static entry wins.
+	for _, dev := range r.devices.Devices() {
+		if dev.Static {
+			continue
+		}
+		if _, isStatic := r.staticHosts[dev.Address]; isStatic {
+			r.devices.Remove(dev.ID)
+		}
 	}
 	return nil
 }
@@ -264,7 +284,15 @@ func (r *snmpReceiver) scanAll(ctx context.Context) {
 				zap.String("network", subnet.Network), zap.Error(err))
 		}
 
+		registered := 0
 		for _, device := range found {
+			// A statically configured device is already polled via its static
+			// entry; registering the scanned duplicate would poll it twice
+			// under a second resource identity.
+			if _, isStatic := r.staticHosts[device.Address]; isStatic {
+				continue
+			}
+			registered++
 			r.devices.Upsert(device)
 
 			// Resolve the profile now rather than on first poll. Matching is a
@@ -284,10 +312,11 @@ func (r *snmpReceiver) scanAll(ctx context.Context) {
 			}
 			r.devices.SetProfile(device.ID, device.SysObjectID, matched)
 		}
-		r.telemetry.discoveredDevices.Add(ctx, int64(len(found)))
+		r.telemetry.discoveredDevices.Add(ctx, int64(registered))
 		r.logger.Info("subnet scanned",
 			zap.String("network", subnet.Network),
 			zap.Int("found", len(found)),
+			zap.Int("registered", registered),
 			zap.Duration("took", time.Since(started)))
 	}
 
@@ -310,6 +339,13 @@ func (r *snmpReceiver) pollLoop(ctx context.Context) {
 	}
 	interval := r.cfg.CollectionInterval
 
+	// inFlight tracks devices whose poll is still running, so a device that
+	// takes longer than the interval is not dispatched to a second worker: two
+	// concurrent polls would race on the device's shared builder and profile
+	// state, and emit duplicate cumulative streams.
+	var inFlightMu sync.Mutex
+	inFlight := map[string]struct{}{}
+
 	jobs := make(chan discovery.Device)
 	var workers sync.WaitGroup
 	for range pollers {
@@ -318,6 +354,9 @@ func (r *snmpReceiver) pollLoop(ctx context.Context) {
 			defer workers.Done()
 			for device := range jobs {
 				r.pollDevice(ctx, device)
+				inFlightMu.Lock()
+				delete(inFlight, device.ID)
+				inFlightMu.Unlock()
 			}
 		}()
 	}
@@ -358,6 +397,19 @@ func (r *snmpReceiver) pollLoop(ctx context.Context) {
 					continue
 				}
 
+				inFlightMu.Lock()
+				_, busy := inFlight[device.ID]
+				if !busy {
+					inFlight[device.ID] = struct{}{}
+				}
+				inFlightMu.Unlock()
+				if busy {
+					// The previous poll is still running. Leave the slot due so
+					// the device is dispatched at the first tick after the poll
+					// returns, rather than concurrently with it.
+					continue
+				}
+
 				// Advance in whole intervals to keep the device's phase, even if
 				// a poll was delayed past its slot.
 				for !due.After(now) {
@@ -372,6 +424,9 @@ func (r *snmpReceiver) pollLoop(ctx context.Context) {
 				default:
 					// Every poller is busy. Skipping is better than queueing
 					// without bound; the next slot will try again.
+					inFlightMu.Lock()
+					delete(inFlight, device.ID)
+					inFlightMu.Unlock()
 					r.logger.Debug("pollers saturated, skipping this slot",
 						zap.String("device", device.Address))
 					r.telemetry.pollErrors.Add(ctx, 1)
@@ -407,7 +462,10 @@ func (r *snmpReceiver) pollDevice(ctx context.Context, device discovery.Device) 
 
 	credentials, err := r.credentialsFor(device)
 	if err != nil {
-		r.logger.Error("no credentials for device", zap.String("device", device.Address), zap.Error(err))
+		// Counted as a failed poll so a device whose subnet was removed from
+		// the config is aged out by its failure budget instead of being
+		// re-polled and re-persisted forever.
+		r.failPoll(ctx, device, fmt.Errorf("no credentials: %w", err))
 		return
 	}
 
@@ -428,14 +486,14 @@ func (r *snmpReceiver) pollDevice(ctx context.Context, device discovery.Device) 
 	}
 	defer func() { _ = session.Close() }()
 
-	state, err := r.ensureProfile(session, device)
+	state, err := r.ensureProfile(ctx, session, device)
 	if err != nil {
 		r.failPoll(ctx, device, err)
 		return
 	}
 
 	scalars, columns := state.compiled.FetchOIDs()
-	values, fetchReport, fetchErr := snmp.Fetch(session, scalars, columns, r.fetchCfg)
+	values, fetchReport, fetchErr := snmp.Fetch(ctx, session, scalars, columns, r.fetchCfg)
 	if fetchReport != nil {
 		r.telemetry.pdusSent.Add(ctx, int64(fetchReport.PDUs))
 		// Stop asking for OIDs this device does not implement.
@@ -537,7 +595,7 @@ func (r *snmpReceiver) credentialsFor(device discovery.Device) (snmp.Credentials
 // ensureProfile resolves and compiles the device's profile, caching the result.
 // The profile is re-detected if the device's sysObjectID changes, which happens
 // when hardware is replaced at the same address.
-func (r *snmpReceiver) ensureProfile(session snmp.Session, device discovery.Device) (*deviceState, error) {
+func (r *snmpReceiver) ensureProfile(ctx context.Context, session snmp.Session, device discovery.Device) (*deviceState, error) {
 	r.mu.Lock()
 	state, ok := r.state[device.ID]
 	if !ok {
@@ -551,7 +609,7 @@ func (r *snmpReceiver) ensureProfile(session snmp.Session, device discovery.Devi
 		sysObjectID := device.SysObjectID
 		if sysObjectID == "" {
 			// A static device has not been probed, so identify it now.
-			detected, ok := discovery.ProbeSysObjectID(session)
+			detected, ok := discovery.ProbeSysObjectID(ctx, session)
 			if !ok {
 				return nil, fmt.Errorf("could not read sysObjectID to select a profile")
 			}

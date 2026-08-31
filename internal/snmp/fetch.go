@@ -1,6 +1,7 @@
 package snmp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -60,19 +61,23 @@ type FetchReport struct {
 // Fetch collects the given OIDs into a value store. Partial failure is normal
 // with SNMP, so it returns whatever it read along with an error describing what
 // it could not: the caller reports the metrics it did get.
-func Fetch(sess Session, scalarOIDs, columnOIDs []string, cfg FetchConfig) (*ValueStore, *FetchReport, error) {
+//
+// Cancellation is honoured between requests: an in-flight request still runs to
+// its own timeout, but a multi-PDU poll against a dead device stops at the next
+// PDU boundary instead of retrying through the whole OID list.
+func Fetch(ctx context.Context, sess Session, scalarOIDs, columnOIDs []string, cfg FetchConfig) (*ValueStore, *FetchReport, error) {
 	cfg = cfg.withDefaults()
 	store := NewValueStore()
 	report := &FetchReport{}
 	var errs []error
 
 	if len(scalarOIDs) > 0 {
-		if err := fetchScalars(sess, scalarOIDs, cfg, store, report); err != nil {
+		if err := fetchScalars(ctx, sess, scalarOIDs, cfg, store, report); err != nil {
 			errs = append(errs, fmt.Errorf("scalars: %w", err))
 		}
 	}
 	if len(columnOIDs) > 0 {
-		if err := fetchColumns(sess, columnOIDs, cfg, store, report); err != nil {
+		if err := fetchColumns(ctx, sess, columnOIDs, cfg, store, report); err != nil {
 			errs = append(errs, fmt.Errorf("columns: %w", err))
 		}
 	}
@@ -81,12 +86,16 @@ func Fetch(sess Session, scalarOIDs, columnOIDs []string, cfg FetchConfig) (*Val
 
 // fetchScalars issues batched GETs, shrinking the batch when a device complains
 // that the response would be too big.
-func fetchScalars(sess Session, oids []string, cfg FetchConfig, store *ValueStore, report *FetchReport) error {
+func fetchScalars(ctx context.Context, sess Session, oids []string, cfg FetchConfig, store *ValueStore, report *FetchReport) error {
 	batch := newBatchSizer(cfg.OIDBatchSize)
 	remaining := append([]string(nil), oids...)
 	var errs []error
 
 	for len(remaining) > 0 {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
 		size := min(batch.size(), len(remaining))
 		chunk := remaining[:size]
 
@@ -137,7 +146,13 @@ func fetchScalars(sess Session, oids []string, cfg FetchConfig, store *ValueStor
 			oid := CanonicalOID(pdu.Name)
 			value, ok := decodePDU(pdu)
 			if !ok {
-				report.MissingOIDs = append(report.MissingOIDs, oid)
+				// Only noSuchObject proves the device does not implement the
+				// OID. noSuchInstance and Null can be transient -- an agent
+				// still populating its tables after a reboot -- and pruning on
+				// them would silence the metric until the receiver restarts.
+				if pdu.Type == gosnmp.NoSuchObject {
+					report.MissingOIDs = append(report.MissingOIDs, oid)
+				}
 				continue
 			}
 			store.Scalars[oid] = value
@@ -151,7 +166,7 @@ func fetchScalars(sess Session, oids []string, cfg FetchConfig, store *ValueStor
 // fetchColumns walks each column. Columns are walked together in batches so one
 // PDU advances several columns at once, which is what keeps PDU count per device
 // low enough to poll thousands of devices.
-func fetchColumns(sess Session, columnOIDs []string, cfg FetchConfig, store *ValueStore, report *FetchReport) error {
+func fetchColumns(ctx context.Context, sess Session, columnOIDs []string, cfg FetchConfig, store *ValueStore, report *FetchReport) error {
 	// next tracks the walk position per column, starting at the column root.
 	next := make(map[string]string, len(columnOIDs))
 	for _, oid := range columnOIDs {
@@ -165,6 +180,10 @@ func fetchColumns(sess Session, columnOIDs []string, cfg FetchConfig, store *Val
 	var errs []error
 
 	for len(next) > 0 {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
 		active := slices.Sorted(maps.Keys(next))
 		size := min(batch.size(), len(active))
 		chunk := active[:size]
@@ -200,7 +219,21 @@ func fetchColumns(sess Session, columnOIDs []string, cfg FetchConfig, store *Val
 			errs = append(errs, err)
 			break
 		}
-		if packet.Error != gosnmp.NoError && packet.Error != gosnmp.NoSuchName {
+		if packet.Error == gosnmp.NoSuchName {
+			// SNMPv1 fails the whole GETNEXT when any varbind has no successor
+			// and echoes the request back, so letting consume see it would
+			// advance nothing and end every column in the chunk -- silently
+			// dropping the other columns' remaining rows. The error index names
+			// the column that ran off the end of the MIB; end just that one.
+			// The request was built in chunk order, so the index maps directly.
+			if idx := int(packet.ErrorIndex); idx >= 1 && idx <= len(chunk) {
+				delete(next, chunk[idx-1])
+				continue
+			}
+			errs = append(errs, fmt.Errorf("walk returned noSuchName with unusable error index %d", packet.ErrorIndex))
+			break
+		}
+		if packet.Error != gosnmp.NoError {
 			errs = append(errs, fmt.Errorf("walk returned %s", packet.Error))
 			break
 		}
@@ -236,12 +269,19 @@ func consume(packet *gosnmp.SnmpPacket, chunk []string, next map[string]string,
 		if !matched {
 			continue
 		}
+		position, walking := next[column]
+		if !walking {
+			// The column ended earlier in this packet (it hit the row cap); a
+			// later repetition must not resurrect the walk or re-report the
+			// truncation.
+			continue
+		}
 		answered[column] = true
 
 		// The walk must advance strictly, or a device echoing our request would
 		// loop forever. Compared numerically: a string compare would treat row
 		// 10 as preceding row 9.
-		if next[column] != column && CompareOIDs(oid, next[column]) <= 0 {
+		if position != column && CompareOIDs(oid, position) <= 0 {
 			continue
 		}
 

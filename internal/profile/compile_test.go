@@ -197,3 +197,33 @@ func TestMissingOIDPruning(t *testing.T) {
 		t.Errorf("MissingCount = %d after re-marking, want 2", got)
 	}
 }
+
+// TestCompileSkipsNonDeviceMetadata guards the fetch set against columns that
+// nothing consumes: only Metadata["device"] is reported, so per-interface
+// metadata columns must not be walked on every poll.
+func TestCompileSkipsNonDeviceMetadata(t *testing.T) {
+	s := newTestStore(t)
+	def, err := s.Resolve("_generic-if")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Compile(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// ifPhysAddress, ifType and ifDescr appear only under metadata.interface.
+	for name, oid := range map[string]string{
+		"ifPhysAddress": "1.3.6.1.2.1.2.2.1.6",
+		"ifType":        "1.3.6.1.2.1.2.2.1.3",
+		"ifDescr":       "1.3.6.1.2.1.2.2.1.2",
+	} {
+		if slices.Contains(c.ColumnOIDs, oid) || slices.Contains(c.ScalarOIDs, oid) {
+			t.Errorf("%s is metadata nothing reports, yet it would be fetched", name)
+		}
+	}
+	// ifAlias is also a metric tag column, so it must still be walked.
+	if !slices.Contains(c.ColumnOIDs, "1.3.6.1.2.1.31.1.1.1.18") {
+		t.Error("ifAlias tags metrics and must still be fetched")
+	}
+}

@@ -104,10 +104,14 @@ func Compile(def *profiledefinition.ProfileDefinition) (*Compiled, error) {
 	addTags(def.MetricTags, scalars)
 
 	for resName, res := range def.Metadata {
-		into := columns
-		if isScalarResource(resName) {
-			into = scalars
+		// Only device-level metadata is reported (the report builder reads
+		// Metadata["device"] alone), so fetching other resources -- notably the
+		// per-interface metadata of profiles extending _generic-if -- would walk
+		// columns on every poll that nothing consumes.
+		if !isScalarResource(resName) {
+			continue
 		}
+		into := scalars
 		for _, field := range res.Fields {
 			addSymbol(field.Symbol, into)
 			for _, s := range field.Symbols {
