@@ -71,14 +71,14 @@ jobs:
             echo "building $target"
             # -s -w matches what the builder passes for its own compile. It cuts
             # ~28% off the binary, in every archive and both image layers.
-            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags="-s -w" -o "$out/otelcol-tsuga" .
+            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags="-s -w" -o "$out/networkdevicereceiver" .
           done
 
       # Proves every shipped factory is registered in the built binary, which a
       # compile alone does not: a component can build and still fail to load.
       - name: verify the shipped components
         run: |
-          ./dist/linux_amd64/otelcol-tsuga components > components.yaml
+          ./dist/linux_amd64/networkdevicereceiver components > components.yaml
           cat components.yaml
           # These are factory names as the components command prints them, which
           # is not always the config key: the otlp exporter reports as
@@ -96,8 +96,8 @@ jobs:
           mkdir -p artifacts
           for dir in dist/*/; do
             platform=$(basename "$dir")
-            tar -czf "artifacts/otelcol-tsuga_${GITHUB_REF_NAME}_${platform}.tar.gz" \
-              -C "$dir" otelcol-tsuga \
+            tar -czf "artifacts/networkdevicereceiver_${GITHUB_REF_NAME}_${platform}.tar.gz" \
+              -C "$dir" networkdevicereceiver \
               -C "$GITHUB_WORKSPACE" README.md LICENSE NOTICE
           done
           (cd artifacts && sha256sum -- *.tar.gz > SHA256SUMS && cat SHA256SUMS)
@@ -162,7 +162,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/otelcol-tsuga
+          images: ghcr.io/${{ github.repository_owner }}/opentelemetry-collector-network-monitoring
           # latest tracks stable tags only, never a pre-release.
           tags: |
             type=ref,event=tag

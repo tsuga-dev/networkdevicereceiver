@@ -285,10 +285,10 @@ false spike.
 
 ## Distribution
 
-Pushing a `v*` tag builds `otelcol-tsuga`, a collector distribution aimed at
-network monitoring, and publishes it two ways: `tar.gz` archives for
+Pushing a `v*` tag builds `networkdevicereceiver`, a collector distribution
+aimed at network monitoring, and publishes it two ways: `tar.gz` archives for
 linux/amd64, linux/arm64 and darwin/arm64 on the GitHub release, and a
-multi-arch image at `ghcr.io/tsuga-dev/otelcol-tsuga`.
+multi-arch image at `ghcr.io/tsuga-dev/opentelemetry-collector-network-monitoring`.
 
 Beyond this receiver it carries the netflow receiver (NetFlow v5/v9, IPFIX and
 sFlow) and the syslog receiver, so one binary covers the three ways network
@@ -302,7 +302,7 @@ matches what a tag publishes:
 ```sh
 go install go.opentelemetry.io/collector/cmd/builder@v0.157.0
 builder --config examples/builder-manifest.yaml
-./_build/otelcol-tsuga --config examples/two-subnets.yaml
+./_build/networkdevicereceiver --config examples/two-subnets.yaml
 ```
 
 Profiles need no packaging. The ~240 embedded profiles are compiled into the
@@ -315,7 +315,7 @@ read access:
 docker run --rm \
   -v ./config.yaml:/etc/otelcol/config.yaml:ro \
   -v ./profiles:/etc/otelcol/profiles:ro \
-  ghcr.io/tsuga-dev/otelcol-tsuga:v0.1.0 --config /etc/otelcol/config.yaml
+  ghcr.io/tsuga-dev/opentelemetry-collector-network-monitoring:v0.1.0 --config /etc/otelcol/config.yaml
 ```
 
 See [Custom profiles](#custom-profiles) for what goes in that directory.

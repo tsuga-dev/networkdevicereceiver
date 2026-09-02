@@ -148,7 +148,7 @@ jobs:
       # compile alone does not: a component can build and still fail to load.
       - name: verify the receiver is registered
         run: |
-          ./_build/otelcol-tsuga components > components.yaml
+          ./_build/networkdevicereceiver components > components.yaml
           cat components.yaml
           grep -q 'networkdevice' components.yaml \
             || { echo "::error::networkdevice receiver missing from the build"; exit 1; }

@@ -4,14 +4,14 @@
 #
 #   go install go.opentelemetry.io/collector/cmd/builder@v0.157.0
 #   builder --config examples/builder-manifest.yaml
-#   ./_build/otelcol-tsuga --config examples/two-subnets.yaml
+#   ./_build/networkdevicereceiver --config examples/two-subnets.yaml
 #
 # The collector version below must stay compatible with the versions this
 # module's go.mod pins (stable v1.63.0 / unstable v0.157.0). A mismatch shows up
 # as unresolvable module requirements at build time, not as a clear error.
 
 dist:
-  name: otelcol-tsuga
+  name: networkdevicereceiver
   description: Tsuga collector distribution for network monitoring
   output_path: ./_build
   otelcol_version: 0.157.0

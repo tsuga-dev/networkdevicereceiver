@@ -10,6 +10,6 @@ ARG TARGETARCH
 
 # --chmod because actions/upload-artifact does not preserve the executable bit,
 # and this image has no shell to fix it up in.
-COPY --chmod=0755 dist/linux_${TARGETARCH}/otelcol-tsuga /otelcol-tsuga
+COPY --chmod=0755 dist/linux_${TARGETARCH}/networkdevicereceiver /networkdevicereceiver
 
-ENTRYPOINT ["/otelcol-tsuga"]
+ENTRYPOINT ["/networkdevicereceiver"]
